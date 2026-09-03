@@ -1,28 +1,29 @@
-import { estimateShippingCents, getCostLookupProduct } from "./printify.js";
-import { BLUEPRINT_ID, PRINT_PROVIDER_ID } from "../src/types.js";
+import { getCostLookupProduct } from "./printify.js";
 
-// Retail = production cost + shipping + estimated VAT + a small flat margin.
+// Retail = production cost + shipping (estimated) + VAT (estimated) + a
+// small flat margin.
 //
-// IMPORTANT CONTEXT: a real fulfilled order showed Production $47.76 +
-// Shipping $75.09 + VAT $24.56 = $147.41 total. Two things were previously
-// missing from this calculation entirely:
-//   1. VAT was never accounted for at all.
-//   2. The live shipping lookup (estimateShippingCents) likely returns 0 for
-//      the "Printify Choice" auto-routing provider, which doesn't appear to
-//      expose a static shipping table the way a named provider does — the
-//      same limitation we hit with cost, which needed a workaround.
-// Pricing without these two produces a price far below Printify's real
-// charge — a genuine risk of selling below cost, not just a thin margin.
+// IMPORTANT: the live Printify shipping.json lookup for this blueprint/
+// provider ("Printify Choice", auto-routing) has now been shown TWICE to
+// return inaccurate numbers rather than failing loudly — a real order was
+// charged $75.09 shipping, but the live API call returned $17.29 for the
+// same size. Because "Printify Choice" doesn't commit to one real fulfiller
+// until order time, its published shipping table doesn't reflect what
+// actually gets charged. Trusting it silently under-prices every order.
 //
-// Until shipping is verified working for all three sizes, this uses a
-// fallback: if the live shipping lookup returns 0, estimate shipping as a
-// multiple of production cost, calibrated from the one real data point
-// above (75.09 / 47.76 ≈ 1.57). VERIFY THIS AGAINST REAL TEST ORDERS FOR
-// MEDIUM AND LARGE TOO before trusting it fully — shipping likely scales
-// somewhat with size/weight, so a flat ratio from one Medium-size data
-// point may not hold precisely for Small or Large.
-const SHIPPING_FALLBACK_MULTIPLIER = Number(process.env.PRICE_SHIPPING_FALLBACK_MULTIPLIER || "1.6");
-const VAT_RATE = Number(process.env.PRICE_VAT_RATE || "0.2"); // 20% — UK standard rate
+// So shipping is NOT pulled live at all here — it's always estimated as a
+// multiple of production cost, calibrated from one real fulfilled order
+// (Production $47.76, Shipping $75.09 → ratio ≈ 1.57, rounded up to 1.6 for
+// a small safety buffer). VAT rate (20%) was also confirmed against that
+// same real order (VAT $24.56 on a $122.85 cost+shipping base ≈ 20.0%).
+//
+// This is still an estimate, calibrated from ONE real Medium-size order.
+// Verify against a real Small and a real Large order (with the Printify
+// card removed first, so nothing actually gets charged if something's
+// still off — you'll see the failure at the fulfillment step instead) if
+// you want this properly confirmed across your whole size range.
+const SHIPPING_MULTIPLIER = Number(process.env.PRICE_SHIPPING_MULTIPLIER || "1.6");
+const VAT_RATE = Number(process.env.PRICE_VAT_RATE || "0.2"); // 20% — confirmed against a real order
 const FLAT_MARGIN_CENTS = Number(process.env.PRICE_FLAT_MARGIN_CENTS || "690"); // $6.90
 
 export async function getLivePriceCents(variantId: number): Promise<{
@@ -39,14 +40,7 @@ export async function getLivePriceCents(variantId: number): Promise<{
   }
 
   const costCents = variant.cost;
-
-  let shippingCents = await estimateShippingCents(BLUEPRINT_ID, PRINT_PROVIDER_ID, variantId);
-  if (shippingCents <= 0) {
-    // Live lookup failed or returned nothing usable — fall back to the
-    // calibrated estimate rather than pricing as if shipping were free.
-    shippingCents = Math.round(costCents * SHIPPING_FALLBACK_MULTIPLIER);
-  }
-
+  const shippingCents = Math.round(costCents * SHIPPING_MULTIPLIER);
   const vatCents = Math.round((costCents + shippingCents) * VAT_RATE);
   const priceCents = costCents + shippingCents + vatCents + FLAT_MARGIN_CENTS;
 
