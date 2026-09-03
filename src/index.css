@@ -1,0 +1,58 @@
+:root {
+  --wall: #dedad0;
+  --wall-shadow: #c9c4b6;
+  --ink: #1b1d1a;
+  --ink-soft: #3a3d37;
+  --walnut: #4a3526;
+  --walnut-dark: #33241a;
+  --brass: #9c7a3c;
+  --brass-light: #c9a86a;
+  --sage: #6b7a66;
+  --paper: #f7f5ef;
+
+  --font-display: "Fraunces", serif;
+  --font-body: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--wall);
+  background-image: radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.15), transparent 45%),
+    radial-gradient(circle at 80% 80%, rgba(0, 0, 0, 0.04), transparent 50%);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
