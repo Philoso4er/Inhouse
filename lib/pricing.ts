@@ -2,7 +2,7 @@ import { getCostLookupProduct } from "./printify.js";
 import { SIZE_OPTIONS } from "../src/types.js";
 
 // Retail = production cost (live from Printify) + shipping (real, per size)
-// + VAT (20%, confirmed) + a small flat margin.
+// + VAT (20%, confirmed) + Stripe fees + GROSS_MARGIN (see below).
 //
 // Shipping is NOT estimated from a ratio anymore — it's hardcoded per size
 // from REAL Printify order data (created via real test orders with the
@@ -26,7 +26,34 @@ const SHIPPING_CENTS_BY_SIZE: Record<string, number> = {
 };
 
 const VAT_RATE = Number(process.env.PRICE_VAT_RATE || "0.2"); // 20% — confirmed against 3 real orders
-const FLAT_MARGIN_CENTS = Number(process.env.PRICE_FLAT_MARGIN_CENTS || "690"); // $6.90
+
+// ---- Pricing model -------------------------------------------------------
+// price = (Printify production cost + shipping + VAT charged by Printify
+//          + Stripe fixed fee) / (1 - Stripe % fee - GROSS_MARGIN)
+// then rounded UP to the next .99. Solving for price this way means the
+// margin and Stripe's % fee are both taken on the final charged amount.
+//
+// Single knob: the gross margin kept after all costs and Stripe fees.
+export const GROSS_MARGIN = 0.4;
+// Stripe UK standard card pricing: 1.5% + 20p (https://stripe.com/gb/pricing).
+export const STRIPE_PERCENT_FEE = 0.015;
+// Checkout is charged in USD (Printify bills in USD), so the 20p fixed fee is
+// expressed in US cents. 20p ≈ $0.27 at ~1.34 USD/GBP.
+export const STRIPE_FIXED_FEE_CENTS = 27;
+
+/** Round up to the next whole-unit-minus-one price, e.g. 19140 -> 19199. */
+export function roundToNinetyNine(cents: number): number {
+  return Math.ceil((cents + 1) / 100) * 100 - 1;
+}
+
+export function computePriceCents(costCents: number, shippingCents: number) {
+  const vatCents = Math.round((costCents + shippingCents) * VAT_RATE);
+  const totalCostCents = costCents + shippingCents + vatCents + STRIPE_FIXED_FEE_CENTS;
+  const raw = totalCostCents / (1 - STRIPE_PERCENT_FEE - GROSS_MARGIN);
+  const priceCents = roundToNinetyNine(Math.ceil(raw));
+  const stripeFeeCents = Math.round(priceCents * STRIPE_PERCENT_FEE) + STRIPE_FIXED_FEE_CENTS;
+  return { priceCents, vatCents, stripeFeeCents };
+}
 
 function shippingCentsForVariant(variantId: number): number {
   for (const size of SIZE_OPTIONS) {
@@ -46,6 +73,7 @@ export async function getLivePriceCents(variantId: number): Promise<{
   costCents: number;
   shippingCents: number;
   vatCents: number;
+  stripeFeeCents: number;
 }> {
   const product = await getCostLookupProduct();
 
@@ -62,8 +90,7 @@ export async function getLivePriceCents(variantId: number): Promise<{
     shippingCents = Math.round(costCents * 3.1);
   }
 
-  const vatCents = Math.round((costCents + shippingCents) * VAT_RATE);
-  const priceCents = costCents + shippingCents + vatCents + FLAT_MARGIN_CENTS;
+  const { priceCents, vatCents, stripeFeeCents } = computePriceCents(costCents, shippingCents);
 
-  return { priceCents, costCents, shippingCents, vatCents };
+  return { priceCents, costCents, shippingCents, vatCents, stripeFeeCents };
 }
