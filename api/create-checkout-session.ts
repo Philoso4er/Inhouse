@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getStripe } from "../lib/stripe.js";
-import { getLivePriceCents } from "../lib/pricing.js";
-import { BLUEPRINT_ID, PRINT_PROVIDER_ID } from "../src/types.js";
+import { getQuote, legacyVariant } from "../lib/pricing.js";
+import { isSupportedCountry } from "../src/providers.js";
+import type { FrameFinish } from "../src/types.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -10,20 +11,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { imageUrl, variantId, sizeLabel } = req.body as {
+    const body = req.body as {
       imageUrl: string;
-      variantId: number;
+      sizeId?: string;
+      frame?: FrameFinish;
+      country?: string;
+      variantId?: number; // legacy clients
       sizeLabel: string;
     };
+    const { imageUrl, sizeLabel } = body;
+    let { sizeId, frame } = body;
+    let country = String(body.country || "").toUpperCase();
+    let providerKey: "printifychoice_us" | undefined;
 
-    if (!imageUrl || !variantId) {
+    // Legacy request shape (variantId only): Printify Choice, shipped to the
+    // same countries as before.
+    if (!sizeId && body.variantId) {
+      const legacy = legacyVariant(Number(body.variantId));
+      if (legacy) ({ sizeId, frame } = legacy);
+      providerKey = "printifychoice_us";
+    }
+
+    if (!imageUrl || !sizeId || !frame) {
       res.status(400).json({ error: "Missing required fields" });
+      return;
+    }
+    if (!providerKey && !isSupportedCountry(country)) {
+      res.status(400).json({ error: "Missing or unsupported shipping country" });
       return;
     }
 
     // Never trust a price sent from the browser — recompute it from the
-    // real Printify cost right here, server-side.
-    const { priceCents } = await getLivePriceCents(variantId);
+    // real Printify cost + shipping for this country, server-side. The quote
+    // also picks the provider and its variant for the order.
+    const quote = await getQuote(sizeId, frame, providerKey ? country || "GB" : country, providerKey);
+    const { priceCents } = quote;
 
     const origin = req.headers.origin || `https://${req.headers.host}`;
     const stripe = getStripe();
@@ -51,13 +73,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
       ],
       shipping_address_collection: {
-        allowed_countries: ["US", "GB", "CA", "AU", "IE"],
+        // Lock the address to the country we priced and picked a provider
+        // for, so the Printify order always matches the quote.
+        allowed_countries: (providerKey
+          ? ["US", "GB", "CA", "AU", "IE"]
+          : [country]) as any,
       },
       metadata: {
         imageUrl,
-        variantId: String(variantId),
-        blueprintId: String(BLUEPRINT_ID),
-        printProviderId: String(PRINT_PROVIDER_ID),
+        variantId: String(quote.variantId),
+        blueprintId: String(quote.blueprintId),
+        printProviderId: String(quote.printProviderId),
+        provider: quote.provider.name,
+        country: quote.country,
         sizeLabel,
       },
       success_url: `${origin}/?success=true`,

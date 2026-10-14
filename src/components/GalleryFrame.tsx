@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { FRAME_LIP_IN, MIN_PRINT_DPI, type FrameFinish, type SizeOption } from "../types";
+import type { PrintArea } from "../providers";
 
 interface Props {
   imageDataUrl: string;
   frame: FrameFinish;
   size: SizeOption;
+  // Print area of the provider actually fulfilling this order (from the quote).
+  printArea?: PrintArea;
 }
 
 const FRAME_COLOURS: Record<FrameFinish, string> = {
@@ -29,7 +32,7 @@ const FRAME_MOULDING_IN = 0.75;
  * aspect ratio for the chosen size, the frame lip (hidden edge) is shaded,
  * and DPI is computed from the uploaded pixels over the real print width.
  */
-export default function GalleryFrame({ imageDataUrl, frame, size }: Props) {
+export default function GalleryFrame({ imageDataUrl, frame, size, printArea }: Props) {
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
@@ -38,7 +41,7 @@ export default function GalleryFrame({ imageDataUrl, frame, size }: Props) {
     img.src = imageDataUrl;
   }, [imageDataUrl]);
 
-  const area = size.printArea;
+  const area = printArea || size.printArea;
   const sheetW = area.widthIn * PX_PER_INCH;
   const moulding = FRAME_MOULDING_IN * PX_PER_INCH;
 

@@ -1,6 +1,7 @@
 import { FRAME_FINISHES, SIZE_OPTIONS, type FrameFinish } from "../types";
 
 interface Props {
+  availability?: Record<string, FrameFinish[]> | null;
   sizeId: string;
   frame: FrameFinish;
   onSizeChange: (id: string) => void;
@@ -18,13 +19,13 @@ const labelStyle: React.CSSProperties = {
   display: "block",
 };
 
-export default function Configurator({ sizeId, frame, onSizeChange, onFrameChange }: Props) {
+export default function Configurator({ availability, sizeId, frame, onSizeChange, onFrameChange }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <div>
         <span style={labelStyle}>Size</span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {SIZE_OPTIONS.map((s) => {
+          {SIZE_OPTIONS.filter((s) => !availability || availability[s.id]?.length).map((s) => {
             const active = s.id === sizeId;
             return (
               <button
@@ -56,7 +57,7 @@ export default function Configurator({ sizeId, frame, onSizeChange, onFrameChang
       <div>
         <span style={labelStyle}>Frame</span>
         <div style={{ display: "flex", gap: 10 }}>
-          {FRAME_FINISHES.map((f) => {
+          {FRAME_FINISHES.filter((f) => !availability || availability[sizeId]?.includes(f.id)).map((f) => {
             const active = f.id === frame;
             return (
               <button
