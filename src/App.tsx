@@ -177,7 +177,7 @@ export default function App() {
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(280px, 360px)", gap: 56 }}>
           <div style={{ display: "flex", justifyContent: "center" }}>
             {imageDataUrl ? (
-              <GalleryFrame imageDataUrl={imageDataUrl} frame={frame} />
+              <GalleryFrame imageDataUrl={imageDataUrl} frame={frame} size={size} />
             ) : (
               <div style={{ maxWidth: 340, width: "100%" }}>
                 <Uploader onImage={handleImage} />
