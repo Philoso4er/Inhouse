@@ -1,45 +1,32 @@
-import { getCostLookupProduct } from "./printify.js";
-import { SIZE_OPTIONS } from "../src/types.js";
-
-// Retail = production cost (live from Printify) + shipping (real, per size)
-// + VAT (20%, confirmed) + Stripe fees + GROSS_MARGIN (see below).
-//
-// Shipping is NOT estimated from a ratio anymore — it's hardcoded per size
-// from REAL Printify order data (created via real test orders with the
-// Printify payment method removed, so nothing was actually charged; the
-// orders sit "On hold" in Printify but show real cost breakdowns):
-//
-//   Small  (11x14): Production $35.89, Shipping $57.19, VAT $18.61  → ratio 1.59x
-//   Medium (16x20): Production $47.76, Shipping $75.09, VAT $24.56  → ratio 1.57x
-//   Large  (20x30): Production $71.03, Shipping $218.39, VAT $57.88 → ratio 3.07x
-//
-// Large's shipping scales far faster than cost (heavier/bulkier package),
-// so a single flat ratio across sizes would have badly underpriced Large.
-// VAT was confirmed at a clean 20% across all three, so that part stays a
-// simple percentage. If Printify's real shipping rates change later, or a
-// new size/frame is added, this table needs updating — it's real data, not
-// a live lookup, so it can go stale.
-const SHIPPING_CENTS_BY_SIZE: Record<string, number> = {
-  "11x14": 5719,
-  "16x20": 7509,
-  "20x30": 21839,
-};
-
-const VAT_RATE = Number(process.env.PRICE_VAT_RATE || "0.2"); // 20% — confirmed against 3 real orders
+import { getShippingProfiles, getVariantCosts, shippingCostFromProfiles } from "./printify.js";
+import {
+  PROVIDERS,
+  candidateProviders,
+  regionForCountry,
+  type PrintArea,
+  type ProviderConfig,
+  type ProviderKey,
+} from "../src/providers.js";
+import type { FrameFinish } from "../src/types.js";
 
 // ---- Pricing model -------------------------------------------------------
-// price = (Printify production cost + shipping + VAT charged by Printify
-//          + Stripe fixed fee) / (1 - Stripe % fee - GROSS_MARGIN)
-// then rounded UP to the next .99. Solving for price this way means the
-// margin and Stripe's % fee are both taken on the final charged amount.
+// price = (Printify production cost + Printify shipping to the customer's
+//          country + VAT charged by Printify + Stripe fixed fee)
+//         / (1 - Stripe % fee - GROSS_MARGIN)
+// rounded UP to the next .99. Cost and shipping are fetched live from
+// Printify per provider and country (cached ~1h, see lib/printify.ts), with
+// the values in src/providers.ts as a fallback if Printify is unreachable.
 //
 // Single knob: the gross margin kept after all costs and Stripe fees.
-export const GROSS_MARGIN = 0.4;
+export const GROSS_MARGIN = 0.3;
 // Stripe UK standard card pricing: 1.5% + 20p (https://stripe.com/gb/pricing).
 export const STRIPE_PERCENT_FEE = 0.015;
 // Checkout is charged in USD (Printify bills in USD), so the 20p fixed fee is
 // expressed in US cents. 20p ≈ $0.27 at ~1.34 USD/GBP.
 export const STRIPE_FIXED_FEE_CENTS = 27;
+// Printify charged 20% VAT on cost + shipping on real test orders for this
+// (UK-based) shop. Applied to every region to avoid under-pricing.
+const VAT_RATE = Number(process.env.PRICE_VAT_RATE || "0.2");
 
 /** Round up to the next whole-unit-minus-one price, e.g. 19140 -> 19199. */
 export function roundToNinetyNine(cents: number): number {
@@ -55,42 +42,100 @@ export function computePriceCents(costCents: number, shippingCents: number) {
   return { priceCents, vatCents, stripeFeeCents };
 }
 
-function shippingCentsForVariant(variantId: number): number {
-  for (const size of SIZE_OPTIONS) {
-    if (Object.values(size.variantIdByFrame).includes(variantId)) {
-      const known = SHIPPING_CENTS_BY_SIZE[size.id];
-      if (known) return known;
-    }
-  }
-  // Unknown size (e.g. a new one added to types.ts without updating this
-  // table) — fall back to a conservative ratio rather than $0, but this
-  // should be treated as a signal to add real data for it.
-  return 0;
-}
-
-export async function getLivePriceCents(variantId: number): Promise<{
+export interface Quote {
   priceCents: number;
   costCents: number;
   shippingCents: number;
   vatCents: number;
   stripeFeeCents: number;
-}> {
-  const product = await getCostLookupProduct();
+  country: string;
+  region: string;
+  provider: { key: ProviderKey; name: string; location: string };
+  blueprintId: number;
+  printProviderId: number;
+  variantId: number;
+  printArea: PrintArea;
+  live: boolean; // false if any fallback value was used
+}
 
-  const variant = (product.variants || []).find((v: any) => v.id === variantId);
-  if (!variant || typeof variant.cost !== "number") {
-    throw new Error(`Could not find live cost for variant ${variantId}`);
+async function quoteProvider(
+  provider: ProviderConfig,
+  sizeId: string,
+  frame: FrameFinish,
+  country: string
+): Promise<Quote | null> {
+  const variant = provider.variants[sizeId]?.[frame];
+  if (!variant) return null;
+  let live = true;
+
+  let costCents = variant.fallbackCostCents;
+  try {
+    const productId = process.env[provider.costLookupProductEnv] || provider.defaultCostLookupProductId;
+    if (!productId) throw new Error(`${provider.costLookupProductEnv} not set`);
+    const cost = (await getVariantCosts(productId)).get(variant.variantId);
+    if (typeof cost !== "number") throw new Error(`no cost for ${variant.variantId}`);
+    costCents = cost;
+  } catch (err: any) {
+    live = false;
+    console.warn(`pricing: cost fallback for ${provider.key}/${variant.variantId}:`, err.message);
   }
 
-  const costCents = variant.cost;
-  let shippingCents = shippingCentsForVariant(variantId);
-  if (shippingCents <= 0) {
-    // No real data for this variant's size — safe fallback using the
-    // highest observed ratio (Large's 3.07x) rather than risk under-pricing.
-    shippingCents = Math.round(costCents * 3.1);
+  const home = regionForCountry(country) === provider.region;
+  let shippingCents = home ? variant.fallbackShippingHomeCents : variant.fallbackShippingOtherCents;
+  try {
+    const profiles = await getShippingProfiles(provider.blueprintId, provider.printProviderId);
+    const ship = shippingCostFromProfiles(profiles, variant.variantId, country);
+    if (ship === null) throw new Error(`no shipping profile for ${variant.variantId} -> ${country}`);
+    shippingCents = ship;
+  } catch (err: any) {
+    live = false;
+    console.warn(`pricing: shipping fallback for ${provider.key}/${variant.variantId}:`, err.message);
   }
 
   const { priceCents, vatCents, stripeFeeCents } = computePriceCents(costCents, shippingCents);
+  return {
+    priceCents,
+    costCents,
+    shippingCents,
+    vatCents,
+    stripeFeeCents,
+    country,
+    region: regionForCountry(country),
+    provider: { key: provider.key, name: provider.name, location: provider.location },
+    blueprintId: provider.blueprintId,
+    printProviderId: provider.printProviderId,
+    variantId: variant.variantId,
+    printArea: variant.printArea,
+    live,
+  };
+}
 
-  return { priceCents, costCents, shippingCents, vatCents, stripeFeeCents };
+/**
+ * Price a size + frame for a shipping country. UK/EU/US use their regional
+ * provider; anywhere else gets whichever provider is cheapest delivered.
+ * Pass providerKey to force a specific provider.
+ */
+export async function getQuote(
+  sizeId: string,
+  frame: FrameFinish,
+  country: string,
+  providerKey?: ProviderKey
+): Promise<Quote> {
+  const c = country.toUpperCase();
+  const providers = providerKey ? [PROVIDERS[providerKey]] : candidateProviders(c);
+  const quotes = (await Promise.all(providers.map((p) => quoteProvider(p, sizeId, frame, c)))).filter(
+    (q): q is Quote => q !== null
+  );
+  if (!quotes.length) throw new Error(`${sizeId} / ${frame} is not available for ${c}`);
+  return quotes.sort((a, b) => a.priceCents - b.priceCents)[0];
+}
+
+/** Map a legacy Printify Choice (blueprint 540) variantId to size + frame. */
+export function legacyVariant(variantId: number): { sizeId: string; frame: FrameFinish } | null {
+  for (const [sizeId, frames] of Object.entries(PROVIDERS.printifychoice_us.variants)) {
+    for (const [frame, v] of Object.entries(frames)) {
+      if (v?.variantId === variantId) return { sizeId, frame: frame as FrameFinish };
+    }
+  }
+  return null;
 }

@@ -5,6 +5,7 @@ import Configurator from "./components/Configurator";
 import Placard from "./components/Placard";
 import CameraPlacer from "./components/CameraPlacer";
 import { SIZE_OPTIONS, type FrameFinish } from "./types";
+import { SHIPPING_COUNTRIES, type PrintArea } from "./providers";
 
 export default function App() {
   const justPaid = useMemo(
@@ -21,21 +22,46 @@ export default function App() {
   const [showCamera, setShowCamera] = useState(false);
   const [priceCents, setPriceCents] = useState<number | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
+  // Shipping country decides the print provider (UK/EU/US) and the price.
+  // Starts empty; the first price call fills it from the visitor's IP country.
+  const [country, setCountry] = useState<string>("");
+  const [availability, setAvailability] = useState<Record<string, FrameFinish[]> | null>(null);
+  const [quoteInfo, setQuoteInfo] = useState<{ provider: string; location: string; printArea: PrintArea } | null>(null);
 
   const size = useMemo(() => SIZE_OPTIONS.find((s) => s.id === sizeId)!, [sizeId]);
-  const variantId = size.variantIdByFrame[frame];
+  const available = !availability || (availability[sizeId] || []).includes(frame);
+
+  // If the chosen size/frame isn't made by this region's provider, switch to
+  // the nearest available option.
+  useEffect(() => {
+    if (!availability || available) return;
+    const frames = availability[sizeId];
+    if (frames?.length) {
+      setFrame(frames[0]);
+      return;
+    }
+    const firstSize = SIZE_OPTIONS.find((s) => availability[s.id]?.length);
+    if (firstSize) setSizeId(firstSize.id);
+  }, [availability, available, sizeId]);
 
   useEffect(() => {
+    if (!available) return;
     let cancelled = false;
     setPriceLoading(true);
     setPriceCents(null);
-    fetch(`/api/get-price?variantId=${variantId}`)
+    const params = new URLSearchParams({ sizeId, frame });
+    if (country) params.set("country", country);
+    fetch(`/api/get-price?${params}`)
       .then((res) => {
         if (!res.ok) throw new Error("price fetch failed");
         return res.json();
       })
       .then((data) => {
-        if (!cancelled) setPriceCents(data.priceCents);
+        if (cancelled) return;
+        setPriceCents(data.priceCents);
+        setAvailability(data.availability || null);
+        setQuoteInfo({ provider: data.provider.name, location: data.provider.location, printArea: data.printArea });
+        if (!country) setCountry(data.country);
       })
       .catch(() => {
         if (!cancelled) setError("Couldn't load live pricing — try again.");
@@ -46,7 +72,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [variantId]);
+  }, [sizeId, frame, country, available]);
 
   async function handleImage(dataUrl: string, file: File) {
     setImageDataUrl(dataUrl);
@@ -79,7 +105,9 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           imageUrl,
-          variantId,
+          sizeId,
+          frame,
+          country,
           sizeLabel: `${size.label} (${size.inches}) — ${frame}`,
         }),
       });
@@ -177,7 +205,7 @@ export default function App() {
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(280px, 360px)", gap: 56 }}>
           <div style={{ display: "flex", justifyContent: "center" }}>
             {imageDataUrl ? (
-              <GalleryFrame imageDataUrl={imageDataUrl} frame={frame} size={size} />
+              <GalleryFrame imageDataUrl={imageDataUrl} frame={frame} size={size} printArea={quoteInfo?.printArea} />
             ) : (
               <div style={{ maxWidth: 340, width: "100%" }}>
                 <Uploader onImage={handleImage} />
@@ -208,7 +236,39 @@ export default function App() {
 
             {imageDataUrl && (
               <>
+                <label style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      color: "var(--ink-soft)",
+                      opacity: 0.65,
+                    }}
+                  >
+                    Ship to
+                  </span>
+                  <select
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    style={{ padding: "10px 12px", fontFamily: "var(--font-body)", fontSize: 14, borderRadius: 2 }}
+                  >
+                    {!country && <option value="">Detecting…</option>}
+                    {SHIPPING_COUNTRIES.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  {quoteInfo && (
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-soft)" }}>
+                      Printed in {quoteInfo.location} by {quoteInfo.provider} · price includes shipping
+                    </span>
+                  )}
+                </label>
                 <Configurator
+                  availability={availability}
                   sizeId={sizeId}
                   frame={frame}
                   onSizeChange={setSizeId}
@@ -222,7 +282,7 @@ export default function App() {
                   priceCents={priceCents}
                   priceLoading={priceLoading}
                   loading={checkoutLoading}
-                  disabled={uploading || !imageUrl || priceCents === null}
+                  disabled={uploading || !imageUrl || priceCents === null || !country || !available}
                   onCheckout={handleCheckout}
                   error={error}
                 />

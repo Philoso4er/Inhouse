@@ -65,36 +65,51 @@ export async function getCostLookupProduct() {
   return getProduct(productId);
 }
 
-/**
- * Rough shipping cost estimate for a variant, in cents. Printify's shipping
- * cost varies by destination country; this takes the first available rate
- * as an approximation. For precise per-order shipping, Printify's
- * order-level shipping calculation would need to run after the address is
- * known — a further improvement, not done here.
- */
-export async function estimateShippingCents(
-  blueprintId: number,
-  printProviderId: number,
-  variantId: number
-): Promise<number> {
-  const res = await fetch(
-    `${PRINTIFY_BASE}/catalog/blueprints/${blueprintId}/print_providers/${printProviderId}/shipping.json`,
-    { headers: authHeaders() }
-  );
-  if (!res.ok) return 0; // fail open — better to under-estimate than block pricing entirely
-  const data = await res.json();
-  try {
-    const profiles = data.profiles || [];
-    for (const profile of profiles) {
-      if (profile.variant_ids?.includes(variantId)) {
-        const firstCost = profile.first_item?.cost;
-        if (typeof firstCost === "number") return firstCost;
-      }
-    }
-  } catch {
-    // fall through to 0
-  }
-  return 0;
+// ---- Live catalog lookups, cached in function memory for ~1 hour ---------
+const CACHE_TTL_MS = 60 * 60 * 1000;
+const cache = new Map<string, { at: number; value: Promise<any> }>();
+
+function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
+  const value = load().catch((err) => {
+    cache.delete(key); // don't cache failures
+    throw err;
+  });
+  cache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+/** variantId -> production cost (US cents) for a cost-lookup product. */
+export function getVariantCosts(productId: string): Promise<Map<number, number>> {
+  return cached(`costs:${productId}`, async () => {
+    const product = await getProduct(productId);
+    const map = new Map<number, number>();
+    for (const v of product.variants || []) if (typeof v.cost === "number") map.set(v.id, v.cost);
+    return map;
+  });
+}
+
+/** Printify shipping profiles for a blueprint + provider. */
+export function getShippingProfiles(blueprintId: number, printProviderId: number): Promise<any[]> {
+  return cached(`ship:${blueprintId}:${printProviderId}`, async () => {
+    const res = await fetch(
+      `${PRINTIFY_BASE}/catalog/blueprints/${blueprintId}/print_providers/${printProviderId}/shipping.json`,
+      { headers: authHeaders() }
+    );
+    if (!res.ok) throw new Error(`Printify shipping lookup failed: ${res.status}`);
+    const data = await res.json();
+    return data.profiles || [];
+  });
+}
+
+/** First-item standard shipping cost (US cents) for a variant to a country, or null if not found. */
+export function shippingCostFromProfiles(profiles: any[], variantId: number, country: string): number | null {
+  const forVariant = profiles.filter((p) => p.variant_ids?.includes(variantId));
+  const exact = forVariant.find((p) => p.countries?.includes(country));
+  const rest = forVariant.find((p) => p.countries?.includes("REST_OF_THE_WORLD"));
+  const cost = (exact || rest)?.first_item?.cost;
+  return typeof cost === "number" ? cost : null;
 }
 
 export interface PrintifyOrderInput {
