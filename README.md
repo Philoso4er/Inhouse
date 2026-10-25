@@ -69,3 +69,36 @@ vercel dev
 - **No inventory/proofing step.** Low-resolution uploads will print blurry; there's no resolution check or warning to the customer yet.
 - **No order history or customer-facing status page.** Customers get a Stripe receipt and (once shipped) a Printify shipping notification — nothing in between.
 - **Tax and international shipping** aren't configured — Stripe Checkout is set up for card payments with shipping to US/GB/CA/AU/IE only; adjust `allowed_countries` in `api/create-checkout-session.ts` as needed.
+
+## Auto-refunds when Printify rejects or cancels an order
+
+No database: the Stripe **PaymentIntent metadata** holds the mapping and status
+(`printify_order_id`, `checkout_session_id`, `inhouse_status`, `inhouse_reason`). The Printify order's
+`external_id`/`label` is the Stripe Checkout session id, so either side can find the other.
+
+- `api/webhook.ts` (Stripe): creates the Printify order and stores its id on the PaymentIntent. If
+  creation fails, the customer is **refunded in full immediately**. Duplicate Stripe deliveries are ignored.
+- `api/printify-webhook.ts` (Printify): on `order:updated` with status `canceled`/`has-issues` (or on-hold
+  with issues), issues a full, idempotent Stripe refund (skipped if already refunded; Stripe idempotency key)
+  and records the reason. Also tracks `in_production` / `shipped`.
+- `api/order-status.ts`: `GET /api/order-status?session_id=cs_...` – the success page polls this and shows
+  "Approved — in production" or "Cancelled: <reason> You've been refunded in full."
+- Email: there's no email provider in the app. Turn on **Stripe → Settings → Customer emails → "Refunds"**
+  so Stripe emails the refund receipt itself.
+
+### Setup (one time)
+1. Generate a secret: `openssl rand -hex 32`. Add it as `PRINTIFY_WEBHOOK_SECRET` in `.env.local` and
+   Vercel (Production + Preview). Optionally set `VITE_REPORT_EMAIL` (address for the "Report a design" link).
+   Redeploy.
+2. Register the Printify webhooks (Printify only does this via API):
+   ```
+   node --env-file=.env.local scripts/register-printify-webhooks.mjs https://<your-domain>
+   ```
+   It registers `order:updated`, `order:sent-to-production`, `order:shipment:created` pointing at
+   `/api/printify-webhook?token=<secret>` with the same `secret`, so deliveries are authenticated by the
+   `X-Pfy-Signature` HMAC header or the URL token. Safe to re-run (skips existing).
+
+## Wall-photo preview
+"See it on your wall" now opens a photo mode by default: take or choose a photo of the wall, then drag the
+four corners. The framed print (real proportions for the chosen size and provider print area, frame colour,
+soft shadow) is warped onto the wall with a CSS `matrix3d` homography. Live camera mode is still one tap away.

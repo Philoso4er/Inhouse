@@ -4,6 +4,51 @@ import GalleryFrame from "./components/GalleryFrame";
 import Configurator from "./components/Configurator";
 import Placard from "./components/Placard";
 import CameraPlacer from "./components/CameraPlacer";
+import WallPhotoPlacer from "./components/WallPhotoPlacer";
+
+const REPORT_EMAIL = import.meta.env.VITE_REPORT_EMAIL || "support@example.com";
+
+function OrderStatus() {
+  const sessionId = useMemo(() => new URLSearchParams(window.location.search).get("session_id"), []);
+  const [st, setSt] = useState<{ status: string; message: string } | null>(null);
+  useEffect(() => {
+    if (!sessionId) return;
+    let stop = false;
+    let tries = 0;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/order-status?session_id=${encodeURIComponent(sessionId)}`);
+        if (r.ok) setSt(await r.json());
+      } catch {
+        /* keep polling */
+      }
+      tries++;
+      // Poll fast at first, then back off; stop once final or after ~30 min.
+      if (!stop && tries < 120) setTimeout(tick, tries < 10 ? 5000 : 15000);
+    };
+    tick();
+    return () => {
+      stop = true;
+    };
+  }, [sessionId]);
+  if (!sessionId) return null;
+  const cancelled = st?.status === "cancelled";
+  return (
+    <p
+      role="status"
+      style={{
+        fontFamily: "var(--font-body)",
+        margin: "0 auto 24px",
+        maxWidth: 460,
+        padding: "12px 16px",
+        border: `1px solid ${cancelled ? "#b33" : "var(--wall-shadow)"}`,
+        color: cancelled ? "#b33" : "var(--ink)",
+      }}
+    >
+      {st ? st.message : "Checking your order status…"}
+    </p>
+  );
+}
 import { SIZE_OPTIONS, type FrameFinish } from "./types";
 import { SHIPPING_COUNTRIES, type PrintArea } from "./providers";
 
@@ -20,6 +65,7 @@ export default function App() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [showWall, setShowWall] = useState(false);
   const [priceCents, setPriceCents] = useState<number | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   // Shipping country decides the print provider (UK/EU/US) and the price.
@@ -178,8 +224,10 @@ export default function App() {
               It's on its way to the printer.
             </h1>
             <p style={{ fontFamily: "var(--font-body)", color: "var(--ink-soft)", marginBottom: 28 }}>
-              You'll get a shipping confirmation by email once it's printed and boxed.
+              You'll get a shipping confirmation by email once it's printed and boxed. If our print partner
+              can't accept the design, the order is cancelled and you're refunded in full automatically.
             </p>
+            <OrderStatus />
             <button
               onClick={() => {
                 window.history.replaceState({}, "", "/");
@@ -286,6 +334,16 @@ export default function App() {
                   onCheckout={handleCheckout}
                   error={error}
                 />
+                <p style={{ margin: 0, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+                  You must own or have rights to the design. Orders with copyrighted logos or characters may be
+                  cancelled and refunded.{" "}
+                  <a
+                    href={`mailto:${REPORT_EMAIL}?subject=${encodeURIComponent("Report a design")}`}
+                    style={{ color: "inherit" }}
+                  >
+                    Report a design
+                  </a>
+                </p>
                 {uploading && (
                   <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-soft)" }}>
                     preparing your image…
@@ -293,7 +351,7 @@ export default function App() {
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
                   <button
-                    onClick={() => setShowCamera(true)}
+                    onClick={() => setShowWall(true)}
                     style={{
                       background: "var(--paper)",
                       border: "1px solid var(--wall-shadow)",
@@ -316,7 +374,7 @@ export default function App() {
                       opacity: 0.55,
                     }}
                   >
-                    live camera preview · true room-anchored AR coming as a premium feature
+                    photo of your wall · drag the corners to fit · live camera also available
                   </p>
                   <button
                     onClick={() => {
@@ -343,6 +401,20 @@ export default function App() {
         </div>
         )}
       </main>
+
+      {showWall && imageDataUrl && (
+        <WallPhotoPlacer
+          imageDataUrl={imageDataUrl}
+          frame={frame}
+          size={size}
+          printArea={quoteInfo?.printArea}
+          onClose={() => setShowWall(false)}
+          onLiveCamera={() => {
+            setShowWall(false);
+            setShowCamera(true);
+          }}
+        />
+      )}
 
       {showCamera && imageDataUrl && (
         <CameraPlacer imageDataUrl={imageDataUrl} frame={frame} onClose={() => setShowCamera(false)} />
