@@ -98,7 +98,8 @@ No database: the Stripe **PaymentIntent metadata** holds the mapping and status
    `/api/printify-webhook?token=<secret>` with the same `secret`, so deliveries are authenticated by the
    `X-Pfy-Signature` HMAC header or the URL token. Safe to re-run (skips existing).
 
-## Wall-photo preview
-"See it on your wall" now opens a photo mode by default: take or choose a photo of the wall, then drag the
-four corners. The framed print (real proportions for the chosen size and provider print area, frame colour,
-soft shadow) is warped onto the wall with a CSS `matrix3d` homography. Live camera mode is still one tap away.
+## Live camera wall preview
+"See it on your wall" opens the rear camera full-screen (getUserMedia, facingMode environment; needs https)
+with the framed print overlaid at its true aspect ratio for the chosen size and frame colour, plus a soft shadow.
+One finger drags it, two-finger pinch resizes it, two-finger twist rotates it. Capture saves or shares a JPEG.
+Camera permission errors show a clear message and a Try again button. Works on iPhone Safari and Android Chrome.

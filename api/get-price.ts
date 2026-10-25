@@ -40,7 +40,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    const quote = await getQuote(sizeId, frame, country, providerKey);
+    let quote;
+    try {
+      quote = await getQuote(sizeId, frame, country, providerKey);
+    } catch (err: any) {
+      // Return availability so the client can switch to an option this region offers.
+      res.status(/not available/i.test(err.message) ? 409 : 500).json({ error: err.message, country, availability: avail });
+      return;
+    }
     res.setHeader("Cache-Control", "private, max-age=60");
     res.status(200).json({ ...quote, geoCountry: geo || null, availability: avail });
   } catch (err: any) {

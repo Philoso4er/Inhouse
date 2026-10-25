@@ -4,7 +4,6 @@ import GalleryFrame from "./components/GalleryFrame";
 import Configurator from "./components/Configurator";
 import Placard from "./components/Placard";
 import CameraPlacer from "./components/CameraPlacer";
-import WallPhotoPlacer from "./components/WallPhotoPlacer";
 
 const REPORT_EMAIL = import.meta.env.VITE_REPORT_EMAIL || "support@example.com";
 
@@ -65,7 +64,6 @@ export default function App() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
-  const [showWall, setShowWall] = useState(false);
   const [priceCents, setPriceCents] = useState<number | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   // Shipping country decides the print provider (UK/EU/US) and the price.
@@ -90,24 +88,50 @@ export default function App() {
     if (firstSize) setSizeId(firstSize.id);
   }, [availability, available, sizeId]);
 
+  // Detect country + regional availability first (cheap call, no Printify
+  // lookup). Falls back to UK so the page never hangs on "Detecting…".
   useEffect(() => {
-    if (!available) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (!cancelled) setCountry((c) => c || "GB");
+    }, 6000);
+    fetch("/api/get-price")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        if (cancelled) return;
+        if (data.availability) setAvailability(data.availability);
+        setCountry((c) => c || data.country || "GB");
+      })
+      .catch(() => {
+        if (!cancelled) setCountry((c) => c || "GB");
+      })
+      .finally(() => clearTimeout(timer));
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!available || !country) return;
     let cancelled = false;
     setPriceLoading(true);
     setPriceCents(null);
-    const params = new URLSearchParams({ sizeId, frame });
-    if (country) params.set("country", country);
+    const params = new URLSearchParams({ sizeId, frame, country });
     fetch(`/api/get-price?${params}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("price fetch failed");
-        return res.json();
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (!cancelled && data.availability) setAvailability(data.availability);
+          throw new Error(data.error || "price fetch failed");
+        }
+        return data;
       })
       .then((data) => {
         if (cancelled) return;
         setPriceCents(data.priceCents);
         setAvailability(data.availability || null);
         setQuoteInfo({ provider: data.provider.name, location: data.provider.location, printArea: data.printArea });
-        if (!country) setCountry(data.country);
       })
       .catch(() => {
         if (!cancelled) setError("Couldn't load live pricing — try again.");
@@ -351,7 +375,7 @@ export default function App() {
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
                   <button
-                    onClick={() => setShowWall(true)}
+                    onClick={() => setShowCamera(true)}
                     style={{
                       background: "var(--paper)",
                       border: "1px solid var(--wall-shadow)",
@@ -374,7 +398,7 @@ export default function App() {
                       opacity: 0.55,
                     }}
                   >
-                    photo of your wall · drag the corners to fit · live camera also available
+                    live camera · drag to place · pinch to resize · twist to rotate
                   </p>
                   <button
                     onClick={() => {
@@ -402,22 +426,14 @@ export default function App() {
         )}
       </main>
 
-      {showWall && imageDataUrl && (
-        <WallPhotoPlacer
+      {showCamera && imageDataUrl && (
+        <CameraPlacer
           imageDataUrl={imageDataUrl}
           frame={frame}
           size={size}
           printArea={quoteInfo?.printArea}
-          onClose={() => setShowWall(false)}
-          onLiveCamera={() => {
-            setShowWall(false);
-            setShowCamera(true);
-          }}
+          onClose={() => setShowCamera(false)}
         />
-      )}
-
-      {showCamera && imageDataUrl && (
-        <CameraPlacer imageDataUrl={imageDataUrl} frame={frame} onClose={() => setShowCamera(false)} />
       )}
 
       <style>{`
