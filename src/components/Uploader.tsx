@@ -1,47 +1,55 @@
 import { useCallback, useRef, useState } from "react";
 
-interface Props {
-  onImage: (dataUrl: string, file: File) => void;
+export interface SourceDims {
+  w: number;
+  h: number;
 }
 
-// Vercel's serverless functions have a hard ~4.5MB request body limit that
-// can't be raised by app config. A high-res photo, once base64-encoded
-// (~33% larger than the raw file), can easily exceed that. Resize down to a
-// sensible max dimension before upload — still plenty sharp for a framed
-// print at normal viewing distance, and keeps the payload well under the
-// limit for virtually any photo.
-const MAX_DIMENSION = 2400;
-const JPEG_QUALITY = 0.88;
+interface Props {
+  onImage: (dataUrl: string, file: File, source: SourceDims) => void;
+}
 
-function resizeImage(file: File): Promise<string> {
+// Vercel serverless functions have a hard 4.5MB request body limit (not
+// configurable). The image is sent base64 in JSON (~33% larger than the
+// bytes), so we keep the encoded payload under ~3.4MB. We keep as many pixels
+// as possible (up to the largest print area, 9000px) and step JPEG quality /
+// dimensions down until it fits. The ORIGINAL pixel size is reported
+// separately so the DPI estimate reflects the user's real file.
+const MAX_DIMENSION = 9000;
+const MAX_DATAURL_CHARS = 3_400_000;
+
+function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
     const img = new Image();
-    const reader = new FileReader();
-    reader.onload = () => {
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-          const scale = MAX_DIMENSION / Math.max(width, height);
-          width = Math.round(width * scale);
-          height = Math.round(height * scale);
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Canvas not supported"));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));
-      };
-      img.onerror = () => reject(new Error("Could not read that image"));
-      img.src = reader.result as string;
-    };
-    reader.onerror = () => reject(new Error("Could not read that file"));
-    reader.readAsDataURL(file);
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Could not read that image"));
+    img.src = url;
   });
+}
+
+async function prepareImage(file: File): Promise<{ dataUrl: string; source: SourceDims }> {
+  const img = await loadImage(file);
+  const source = { w: img.naturalWidth, h: img.naturalHeight };
+  let scale = Math.min(1, MAX_DIMENSION / Math.max(source.w, source.h));
+  const qualities = [0.92, 0.85, 0.78];
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const width = Math.max(1, Math.round(source.w * scale));
+    const height = Math.max(1, Math.round(source.h * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas not supported");
+    ctx.drawImage(img, 0, 0, width, height);
+    for (const q of qualities) {
+      const dataUrl = canvas.toDataURL("image/jpeg", q);
+      // Some mobile browsers silently return "data:," for oversized canvases.
+      if (dataUrl.length > 100 && dataUrl.length <= MAX_DATAURL_CHARS) return { dataUrl, source };
+    }
+    scale *= 0.8;
+  }
+  throw new Error("Image too large to prepare for upload");
 }
 
 export default function Uploader({ onImage }: Props) {
@@ -54,14 +62,19 @@ export default function Uploader({ onImage }: Props) {
       if (!file || !file.type.startsWith("image/")) return;
       setProcessing(true);
       try {
-        const dataUrl = await resizeImage(file);
-        onImage(dataUrl, file);
+        const { dataUrl, source } = await prepareImage(file);
+        onImage(dataUrl, file, source);
       } catch {
-        // Fall back to the original file if resizing fails for any reason
-        // (e.g. an unusual format) — better to attempt the real upload than
-        // block the user entirely.
+        // Fall back to the original file if resizing fails (e.g. an unusual
+        // format); the server reports clearly if it's too big.
         const reader = new FileReader();
-        reader.onload = () => onImage(reader.result as string, file);
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const img = new Image();
+          img.onload = () => onImage(dataUrl, file, { w: img.naturalWidth, h: img.naturalHeight });
+          img.onerror = () => onImage(dataUrl, file, { w: 0, h: 0 });
+          img.src = dataUrl;
+        };
         reader.readAsDataURL(file);
       } finally {
         setProcessing(false);

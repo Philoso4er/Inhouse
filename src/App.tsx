@@ -65,12 +65,19 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [priceCents, setPriceCents] = useState<number | null>(null);
+  const [currency, setCurrency] = useState<string>("gbp");
+  const [sourceDims, setSourceDims] = useState<{ w: number; h: number } | null>(null);
+  // Errors are tagged by source so a fix to one input clears only its own error.
+  const [priceError, setPriceError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   // Shipping country decides the print provider (UK/EU/US) and the price.
   // Starts empty; the first price call fills it from the visitor's IP country.
   const [country, setCountry] = useState<string>("");
   const [availability, setAvailability] = useState<Record<string, FrameFinish[]> | null>(null);
-  const [quoteInfo, setQuoteInfo] = useState<{ provider: string; location: string; printArea: PrintArea } | null>(null);
+  const [quoteInfo, setQuoteInfo] = useState<{ sizeId: string; provider: string; location: string; printArea: PrintArea } | null>(null);
+  // Only trust the quote's print area if it belongs to the currently selected size.
+  const printArea = quoteInfo && quoteInfo.sizeId === sizeId ? quoteInfo.printArea : undefined;
 
   const size = useMemo(() => SIZE_OPTIONS.find((s) => s.id === sizeId)!, [sizeId]);
   const available = !availability || (availability[sizeId] || []).includes(frame);
@@ -117,6 +124,8 @@ export default function App() {
     let cancelled = false;
     setPriceLoading(true);
     setPriceCents(null);
+    setPriceError(null);
+    setError(null);
     const params = new URLSearchParams({ sizeId, frame, country });
     fetch(`/api/get-price?${params}`)
       .then(async (res) => {
@@ -130,11 +139,12 @@ export default function App() {
       .then((data) => {
         if (cancelled) return;
         setPriceCents(data.priceCents);
+        if (data.currency) setCurrency(data.currency);
         setAvailability(data.availability || null);
-        setQuoteInfo({ provider: data.provider.name, location: data.provider.location, printArea: data.printArea });
+        setQuoteInfo({ sizeId, provider: data.provider.name, location: data.provider.location, printArea: data.printArea });
       })
       .catch(() => {
-        if (!cancelled) setError("Couldn't load live pricing — try again.");
+        if (!cancelled) setPriceError("Couldn't load live pricing — try again.");
       })
       .finally(() => {
         if (!cancelled) setPriceLoading(false);
@@ -144,10 +154,12 @@ export default function App() {
     };
   }, [sizeId, frame, country, available]);
 
-  async function handleImage(dataUrl: string, file: File) {
+  async function handleImage(dataUrl: string, file: File, source: { w: number; h: number }) {
     setImageDataUrl(dataUrl);
+    setSourceDims(source.w ? source : null);
     setImageUrl(null);
     setError(null);
+    setUploadError(null);
     setUploading(true);
     try {
       const res = await fetch("/api/upload-image", {
@@ -155,11 +167,19 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileName: file.name, dataUrl }),
       });
-      if (!res.ok) throw new Error("Upload failed");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as any));
+        if (res.status === 413) throw new Error("That image is too large to upload — try a smaller file.");
+        throw new Error(data.error || `Upload failed (${res.status}).`);
+      }
       const { imageUrl } = await res.json();
       setImageUrl(imageUrl);
-    } catch (e) {
-      setError("Couldn't upload that image — try again.");
+    } catch (e: any) {
+      setUploadError(
+        e instanceof TypeError
+          ? "Couldn't upload that image — check your connection and try again."
+          : `Couldn't upload that image: ${e?.message || "unknown error"}`
+      );
     } finally {
       setUploading(false);
     }
@@ -181,11 +201,14 @@ export default function App() {
           sizeLabel: `${size.label} (${size.inches}) — ${frame}`,
         }),
       });
-      if (!res.ok) throw new Error("Checkout failed");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as any));
+        throw new Error(data.error || "Checkout failed");
+      }
       const { url } = await res.json();
       window.location.href = url;
-    } catch (e) {
-      setError("Couldn't start checkout — try again in a moment.");
+    } catch (e: any) {
+      setError(`Couldn't start checkout: ${e?.message || "try again in a moment."}`);
     } finally {
       setCheckoutLoading(false);
     }
@@ -277,7 +300,7 @@ export default function App() {
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(280px, 360px)", gap: 56 }}>
           <div style={{ display: "flex", justifyContent: "center" }}>
             {imageDataUrl ? (
-              <GalleryFrame imageDataUrl={imageDataUrl} frame={frame} size={size} printArea={quoteInfo?.printArea} />
+              <GalleryFrame imageDataUrl={imageDataUrl} frame={frame} size={size} printArea={printArea} sourceDims={sourceDims} />
             ) : (
               <div style={{ maxWidth: 340, width: "100%" }}>
                 <Uploader onImage={handleImage} />
@@ -352,11 +375,12 @@ export default function App() {
                   sizeInches={size.inches}
                   frameLabel={`${frame[0].toUpperCase()}${frame.slice(1)} frame`}
                   priceCents={priceCents}
+                  currency={currency}
                   priceLoading={priceLoading}
                   loading={checkoutLoading}
                   disabled={uploading || !imageUrl || priceCents === null || !country || !available}
                   onCheckout={handleCheckout}
-                  error={error}
+                  error={uploadError || priceError || error}
                 />
                 <p style={{ margin: 0, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-soft)", lineHeight: 1.5 }}>
                   You must own or have rights to the design. Orders with copyrighted logos or characters may be
@@ -404,6 +428,9 @@ export default function App() {
                     onClick={() => {
                       setImageDataUrl(null);
                       setImageUrl(null);
+                      setSourceDims(null);
+                      setUploadError(null);
+                      setError(null);
                     }}
                     style={{
                       background: "none",
@@ -431,7 +458,7 @@ export default function App() {
           imageDataUrl={imageDataUrl}
           frame={frame}
           size={size}
-          printArea={quoteInfo?.printArea}
+          printArea={printArea}
           onClose={() => setShowCamera(false)}
         />
       )}

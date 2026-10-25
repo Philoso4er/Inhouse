@@ -4,6 +4,7 @@ interface Props {
   sizeInches: string;
   frameLabel: string;
   priceCents: number | null;
+  currency?: string;
   priceLoading: boolean;
   loading: boolean;
   disabled: boolean;
@@ -17,13 +18,17 @@ export default function Placard({
   sizeInches,
   frameLabel,
   priceCents,
+  currency = "gbp",
   priceLoading,
   loading,
   disabled,
   onCheckout,
   error,
 }: Props) {
-  const price = priceCents !== null ? (priceCents / 100).toFixed(2) : null;
+  const price =
+    priceCents !== null
+      ? new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase() }).format(priceCents / 100)
+      : null;
 
   return (
     <div
@@ -86,7 +91,7 @@ export default function Placard({
       >
         <span>{loading ? "Preparing checkout…" : "Order this print"}</span>
         <span style={{ fontFamily: "var(--font-mono)" }}>
-          {priceLoading || price === null ? "…" : `$${price}`}
+          {priceLoading || price === null ? "…" : price}
         </span>
       </button>
 

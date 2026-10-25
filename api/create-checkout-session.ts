@@ -63,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       line_items: [
         {
           price_data: {
-            currency: "usd",
+            currency: quote.currency,
             unit_amount: priceCents,
             product_data: {
               name: `Custom print — ${sizeLabel}`,

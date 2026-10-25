@@ -8,6 +8,8 @@ interface Props {
   size: SizeOption;
   // Print area of the provider actually fulfilling this order (from the quote).
   printArea?: PrintArea;
+  // Pixel size of the user's ORIGINAL file (before upload compression).
+  sourceDims?: { w: number; h: number } | null;
 }
 
 const FRAME_COLOURS: Record<FrameFinish, string> = {
@@ -32,7 +34,7 @@ const FRAME_MOULDING_IN = 0.75;
  * aspect ratio for the chosen size, the frame lip (hidden edge) is shaded,
  * and DPI is computed from the uploaded pixels over the real print width.
  */
-export default function GalleryFrame({ imageDataUrl, frame, size, printArea }: Props) {
+export default function GalleryFrame({ imageDataUrl, frame, size, printArea, sourceDims }: Props) {
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
@@ -47,7 +49,10 @@ export default function GalleryFrame({ imageDataUrl, frame, size, printArea }: P
 
   // Image placement in inches on the sheet.
   const imgHeightIn = dims ? (area.widthIn * dims.h) / dims.w : area.heightIn;
-  const dpi = dims ? Math.round(dims.w / area.widthIn) : null;
+  // Effective DPI = the limiting axis when the image is scaled to fill the
+  // print width, using the original file's pixels. Recomputed per size.
+  const px = sourceDims && sourceDims.w ? sourceDims : dims;
+  const dpi = px ? Math.round(px.w / area.widthIn) : null;
   const croppedIn = Math.max(0, imgHeightIn - area.heightIn);
   const blankIn = Math.max(0, area.heightIn - imgHeightIn);
   const lowRes = dpi !== null && dpi < MIN_PRINT_DPI;
