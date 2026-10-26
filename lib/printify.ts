@@ -173,3 +173,13 @@ export async function createPrintifyOrder(input: PrintifyOrderInput) {
   }
   return res.json();
 }
+
+export async function getPrintifyOrder(orderId: string) {
+  const shopId = process.env.PRINTIFY_SHOP_ID;
+  if (!shopId) throw new Error("PRINTIFY_SHOP_ID is not set");
+  const res = await fetch(`${PRINTIFY_BASE}/shops/${shopId}/orders/${encodeURIComponent(orderId)}.json`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Printify get order failed: ${res.status}`);
+  return res.json();
+}

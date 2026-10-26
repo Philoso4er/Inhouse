@@ -1,3 +1,4 @@
+import { convertFromUsdCents, currencyForCountry } from "./currency.js";
 import { getShippingProfiles, getVariantCosts, shippingCostFromProfiles } from "./printify.js";
 import {
   PROVIDERS,
@@ -43,7 +44,11 @@ export function computePriceCents(costCents: number, shippingCents: number) {
 }
 
 export interface Quote {
+  /** Price in minor units of `currency` — what is displayed and charged. */
   priceCents: number;
+  currency: string;
+  /** Same price in US cents (Printify's billing currency), for comparison. */
+  priceUsdCents: number;
   costCents: number;
   shippingCents: number;
   vatCents: number;
@@ -92,9 +97,14 @@ async function quoteProvider(
     console.warn(`pricing: shipping fallback for ${provider.key}/${variant.variantId}:`, err.message);
   }
 
-  const { priceCents, vatCents, stripeFeeCents } = computePriceCents(costCents, shippingCents);
+  const { priceCents: priceUsdCents, vatCents, stripeFeeCents } = computePriceCents(costCents, shippingCents);
+  const currency = currencyForCountry(country);
+  const priceCents =
+    currency === "usd" ? priceUsdCents : roundToNinetyNine(await convertFromUsdCents(priceUsdCents, currency));
   return {
     priceCents,
+    currency,
+    priceUsdCents,
     costCents,
     shippingCents,
     vatCents,
@@ -127,7 +137,7 @@ export async function getQuote(
     (q): q is Quote => q !== null
   );
   if (!quotes.length) throw new Error(`${sizeId} / ${frame} is not available for ${c}`);
-  return quotes.sort((a, b) => a.priceCents - b.priceCents)[0];
+  return quotes.sort((a, b) => a.priceUsdCents - b.priceUsdCents)[0];
 }
 
 /** Map a legacy Printify Choice (blueprint 540) variantId to size + frame. */

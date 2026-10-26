@@ -63,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       line_items: [
         {
           price_data: {
-            currency: "usd",
+            currency: quote.currency,
             unit_amount: priceCents,
             product_data: {
               name: `Custom print — ${sizeLabel}`,
@@ -88,7 +88,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         country: quote.country,
         sizeLabel,
       },
-      success_url: `${origin}/?success=true`,
+      payment_intent_data: {
+        metadata: { inhouse_status: "paid" },
+      },
+      success_url: `${origin}/?success=true&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/`,
     });
 

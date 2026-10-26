@@ -4,6 +4,50 @@ import GalleryFrame from "./components/GalleryFrame";
 import Configurator from "./components/Configurator";
 import Placard from "./components/Placard";
 import CameraPlacer from "./components/CameraPlacer";
+
+const REPORT_EMAIL = import.meta.env.VITE_REPORT_EMAIL || "support@example.com";
+
+function OrderStatus() {
+  const sessionId = useMemo(() => new URLSearchParams(window.location.search).get("session_id"), []);
+  const [st, setSt] = useState<{ status: string; message: string } | null>(null);
+  useEffect(() => {
+    if (!sessionId) return;
+    let stop = false;
+    let tries = 0;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/order-status?session_id=${encodeURIComponent(sessionId)}`);
+        if (r.ok) setSt(await r.json());
+      } catch {
+        /* keep polling */
+      }
+      tries++;
+      // Poll fast at first, then back off; stop once final or after ~30 min.
+      if (!stop && tries < 120) setTimeout(tick, tries < 10 ? 5000 : 15000);
+    };
+    tick();
+    return () => {
+      stop = true;
+    };
+  }, [sessionId]);
+  if (!sessionId) return null;
+  const cancelled = st?.status === "cancelled";
+  return (
+    <p
+      role="status"
+      style={{
+        fontFamily: "var(--font-body)",
+        margin: "0 auto 24px",
+        maxWidth: 460,
+        padding: "12px 16px",
+        border: `1px solid ${cancelled ? "#b33" : "var(--wall-shadow)"}`,
+        color: cancelled ? "#b33" : "var(--ink)",
+      }}
+    >
+      {st ? st.message : "Checking your order status…"}
+    </p>
+  );
+}
 import { SIZE_OPTIONS, type FrameFinish } from "./types";
 import { SHIPPING_COUNTRIES, type PrintArea } from "./providers";
 
@@ -21,12 +65,19 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [priceCents, setPriceCents] = useState<number | null>(null);
+  const [currency, setCurrency] = useState<string>("gbp");
+  const [sourceDims, setSourceDims] = useState<{ w: number; h: number } | null>(null);
+  // Errors are tagged by source so a fix to one input clears only its own error.
+  const [priceError, setPriceError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   // Shipping country decides the print provider (UK/EU/US) and the price.
   // Starts empty; the first price call fills it from the visitor's IP country.
   const [country, setCountry] = useState<string>("");
   const [availability, setAvailability] = useState<Record<string, FrameFinish[]> | null>(null);
-  const [quoteInfo, setQuoteInfo] = useState<{ provider: string; location: string; printArea: PrintArea } | null>(null);
+  const [quoteInfo, setQuoteInfo] = useState<{ sizeId: string; provider: string; location: string; printArea: PrintArea } | null>(null);
+  // Only trust the quote's print area if it belongs to the currently selected size.
+  const printArea = quoteInfo && quoteInfo.sizeId === sizeId ? quoteInfo.printArea : undefined;
 
   const size = useMemo(() => SIZE_OPTIONS.find((s) => s.id === sizeId)!, [sizeId]);
   const available = !availability || (availability[sizeId] || []).includes(frame);
@@ -44,27 +95,56 @@ export default function App() {
     if (firstSize) setSizeId(firstSize.id);
   }, [availability, available, sizeId]);
 
+  // Detect country + regional availability first (cheap call, no Printify
+  // lookup). Falls back to UK so the page never hangs on "Detecting…".
   useEffect(() => {
-    if (!available) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (!cancelled) setCountry((c) => c || "GB");
+    }, 6000);
+    fetch("/api/get-price")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        if (cancelled) return;
+        if (data.availability) setAvailability(data.availability);
+        setCountry((c) => c || data.country || "GB");
+      })
+      .catch(() => {
+        if (!cancelled) setCountry((c) => c || "GB");
+      })
+      .finally(() => clearTimeout(timer));
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!available || !country) return;
     let cancelled = false;
     setPriceLoading(true);
     setPriceCents(null);
-    const params = new URLSearchParams({ sizeId, frame });
-    if (country) params.set("country", country);
+    setPriceError(null);
+    setError(null);
+    const params = new URLSearchParams({ sizeId, frame, country });
     fetch(`/api/get-price?${params}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("price fetch failed");
-        return res.json();
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (!cancelled && data.availability) setAvailability(data.availability);
+          throw new Error(data.error || "price fetch failed");
+        }
+        return data;
       })
       .then((data) => {
         if (cancelled) return;
         setPriceCents(data.priceCents);
+        if (data.currency) setCurrency(data.currency);
         setAvailability(data.availability || null);
-        setQuoteInfo({ provider: data.provider.name, location: data.provider.location, printArea: data.printArea });
-        if (!country) setCountry(data.country);
+        setQuoteInfo({ sizeId, provider: data.provider.name, location: data.provider.location, printArea: data.printArea });
       })
       .catch(() => {
-        if (!cancelled) setError("Couldn't load live pricing — try again.");
+        if (!cancelled) setPriceError("Couldn't load live pricing — try again.");
       })
       .finally(() => {
         if (!cancelled) setPriceLoading(false);
@@ -74,10 +154,12 @@ export default function App() {
     };
   }, [sizeId, frame, country, available]);
 
-  async function handleImage(dataUrl: string, file: File) {
+  async function handleImage(dataUrl: string, file: File, source: { w: number; h: number }) {
     setImageDataUrl(dataUrl);
+    setSourceDims(source.w ? source : null);
     setImageUrl(null);
     setError(null);
+    setUploadError(null);
     setUploading(true);
     try {
       const res = await fetch("/api/upload-image", {
@@ -85,11 +167,19 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileName: file.name, dataUrl }),
       });
-      if (!res.ok) throw new Error("Upload failed");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as any));
+        if (res.status === 413) throw new Error("That image is too large to upload — try a smaller file.");
+        throw new Error(data.error || `Upload failed (${res.status}).`);
+      }
       const { imageUrl } = await res.json();
       setImageUrl(imageUrl);
-    } catch (e) {
-      setError("Couldn't upload that image — try again.");
+    } catch (e: any) {
+      setUploadError(
+        e instanceof TypeError
+          ? "Couldn't upload that image — check your connection and try again."
+          : `Couldn't upload that image: ${e?.message || "unknown error"}`
+      );
     } finally {
       setUploading(false);
     }
@@ -111,11 +201,14 @@ export default function App() {
           sizeLabel: `${size.label} (${size.inches}) — ${frame}`,
         }),
       });
-      if (!res.ok) throw new Error("Checkout failed");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as any));
+        throw new Error(data.error || "Checkout failed");
+      }
       const { url } = await res.json();
       window.location.href = url;
-    } catch (e) {
-      setError("Couldn't start checkout — try again in a moment.");
+    } catch (e: any) {
+      setError(`Couldn't start checkout: ${e?.message || "try again in a moment."}`);
     } finally {
       setCheckoutLoading(false);
     }
@@ -178,8 +271,10 @@ export default function App() {
               It's on its way to the printer.
             </h1>
             <p style={{ fontFamily: "var(--font-body)", color: "var(--ink-soft)", marginBottom: 28 }}>
-              You'll get a shipping confirmation by email once it's printed and boxed.
+              You'll get a shipping confirmation by email once it's printed and boxed. If our print partner
+              can't accept the design, the order is cancelled and you're refunded in full automatically.
             </p>
+            <OrderStatus />
             <button
               onClick={() => {
                 window.history.replaceState({}, "", "/");
@@ -205,7 +300,7 @@ export default function App() {
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(280px, 360px)", gap: 56 }}>
           <div style={{ display: "flex", justifyContent: "center" }}>
             {imageDataUrl ? (
-              <GalleryFrame imageDataUrl={imageDataUrl} frame={frame} size={size} printArea={quoteInfo?.printArea} />
+              <GalleryFrame imageDataUrl={imageDataUrl} frame={frame} size={size} printArea={printArea} sourceDims={sourceDims} />
             ) : (
               <div style={{ maxWidth: 340, width: "100%" }}>
                 <Uploader onImage={handleImage} />
@@ -280,12 +375,23 @@ export default function App() {
                   sizeInches={size.inches}
                   frameLabel={`${frame[0].toUpperCase()}${frame.slice(1)} frame`}
                   priceCents={priceCents}
+                  currency={currency}
                   priceLoading={priceLoading}
                   loading={checkoutLoading}
                   disabled={uploading || !imageUrl || priceCents === null || !country || !available}
                   onCheckout={handleCheckout}
-                  error={error}
+                  error={uploadError || priceError || error}
                 />
+                <p style={{ margin: 0, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+                  You must own or have rights to the design. Orders with copyrighted logos or characters may be
+                  cancelled and refunded.{" "}
+                  <a
+                    href={`mailto:${REPORT_EMAIL}?subject=${encodeURIComponent("Report a design")}`}
+                    style={{ color: "inherit" }}
+                  >
+                    Report a design
+                  </a>
+                </p>
                 {uploading && (
                   <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-soft)" }}>
                     preparing your image…
@@ -316,12 +422,15 @@ export default function App() {
                       opacity: 0.55,
                     }}
                   >
-                    live camera preview · true room-anchored AR coming as a premium feature
+                    live camera · drag to place · pinch to resize · twist to rotate
                   </p>
                   <button
                     onClick={() => {
                       setImageDataUrl(null);
                       setImageUrl(null);
+                      setSourceDims(null);
+                      setUploadError(null);
+                      setError(null);
                     }}
                     style={{
                       background: "none",
@@ -345,7 +454,13 @@ export default function App() {
       </main>
 
       {showCamera && imageDataUrl && (
-        <CameraPlacer imageDataUrl={imageDataUrl} frame={frame} onClose={() => setShowCamera(false)} />
+        <CameraPlacer
+          imageDataUrl={imageDataUrl}
+          frame={frame}
+          size={size}
+          printArea={printArea}
+          onClose={() => setShowCamera(false)}
+        />
       )}
 
       <style>{`
