@@ -22,8 +22,9 @@ export function buildFrameScene(p: PrintSize, frame: FrameFinish, texture?: THRE
   const frameMat = new THREE.MeshStandardMaterial({ color: FRAME_COLOURS[frame], roughness: 0.6, metalness: 0 });
   frameMat.name = "Frame";
   const bar = (bw: number, bh: number, x: number, y: number, name: string) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, d), frameMat);
-    mesh.position.set(x, y, d / 2);
+    // Transforms are baked into the vertices (not node transforms) so every
+    // exporter, including USDZ/Quick Look, sees the bars at the edges.
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, d).translate(x, y, d / 2), frameMat);
     mesh.name = name;
     group.add(mesh);
   };
@@ -32,18 +33,17 @@ export function buildFrameScene(p: PrintSize, frame: FrameFinish, texture?: THRE
   bar(m, h, -w / 2 - m / 2, 0, "FrameLeft");
   bar(m, h, w / 2 + m / 2, 0, "FrameRight");
   // Backing board
-  const back = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.004), new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 1 }));
-  back.position.set(0, 0, 0.002);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.004).translate(0, 0, 0.002), new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 1 }));
   back.name = "Backing";
   group.add(back);
   // The print, slightly recessed behind the moulding face
   const printMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0, map: texture ?? null });
   printMat.name = "Print";
-  const print = new THREE.Mesh(new THREE.PlaneGeometry(w, h), printMat);
-  print.position.set(0, 0, d - 0.006);
+  const print = new THREE.Mesh(new THREE.PlaneGeometry(w, h).translate(0, 0, d - 0.006), printMat);
   print.name = "Print";
   group.add(print);
   scene.add(group);
+  scene.updateMatrixWorld(true);
   return scene;
 }
 
