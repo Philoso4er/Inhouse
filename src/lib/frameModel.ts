@@ -14,7 +14,16 @@ export function frameOuterSizeM(p: PrintSize) {
   return { width: (p.widthIn + 2 * MOULDING_IN) * INCH, height: (p.heightIn + 2 * MOULDING_IN) * INCH, depth: FRAME_DEPTH_M };
 }
 
-export function buildFrameScene(p: PrintSize, frame: FrameFinish, texture?: THREE.Texture): THREE.Scene {
+// Orientation conventions differ per AR viewer:
+//  - "wall" (GLB / model-viewer ar-placement="wall", WebXR & Scene Viewer):
+//    upright in XY, +Y up, front faces +Z, back (z=0) goes on the wall.
+//  - "quicklook" (USDZ with vertical plane anchoring): Quick Look / RealityKit
+//    plane anchors use +Y as the plane NORMAL (out of the wall), so the print
+//    must lie in XZ with its front facing +Y and its top towards -Z. Without
+//    this the print stuck out of the wall like a shelf.
+export type ModelOrientation = "wall" | "quicklook";
+
+export function buildFrameScene(p: PrintSize, frame: FrameFinish, texture?: THREE.Texture, orientation: ModelOrientation = "wall"): THREE.Scene {
   const scene = new THREE.Scene();
   const group = new THREE.Group();
   group.name = "FramedPrint";
@@ -42,6 +51,10 @@ export function buildFrameScene(p: PrintSize, frame: FrameFinish, texture?: THRE
   const print = new THREE.Mesh(new THREE.PlaneGeometry(w, h).translate(0, 0, d - 0.006), printMat);
   print.name = "Print";
   group.add(print);
+  if (orientation === "quicklook") {
+    // Rotate -90° about X: +Z (front) -> +Y, +Y (top) -> -Z. Baked into vertices.
+    group.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).geometry.rotateX(-Math.PI / 2); });
+  }
   scene.add(group);
   scene.updateMatrixWorld(true);
   return scene;

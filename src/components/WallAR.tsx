@@ -28,8 +28,10 @@ export default function WallAR({ imageDataUrl, frame, size, printArea, onClose, 
       try {
         const [, lib] = await Promise.all([import("@google/model-viewer"), import("../lib/frameModel")]);
         const tex = await lib.loadPrintTexture(imageDataUrl, area);
-        const scene = lib.buildFrameScene(area, frame, tex);
-        const [glb, usdz] = await Promise.all([lib.exportGLB(scene), lib.exportUSDZ(scene)]);
+        const [glb, usdz] = await Promise.all([
+          lib.exportGLB(lib.buildFrameScene(area, frame, tex, "wall")),
+          lib.exportUSDZ(lib.buildFrameScene(area, frame, tex, "quicklook")),
+        ]);
         if (cancelled) return;
         const g = URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
         const u = URL.createObjectURL(new Blob([usdz], { type: "model/vnd.usdz+zip" }));
