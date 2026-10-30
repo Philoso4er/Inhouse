@@ -55,7 +55,10 @@ export default function GalleryFrame({ imageDataUrl, frame, size, printArea, sou
   const dpi = px ? Math.round(px.w / area.widthIn) : null;
   const croppedIn = Math.max(0, imgHeightIn - area.heightIn);
   const blankIn = Math.max(0, area.heightIn - imgHeightIn);
-  const lowRes = dpi !== null && dpi < MIN_PRINT_DPI;
+  const lowRes = dpi !== null && dpi < 100;
+  const softRes = dpi !== null && !lowRes && dpi < MIN_PRINT_DPI;
+  // Largest print width (inches) this image can fill at a good DPI.
+  const bestWidthIn = px ? Math.floor(px.w / MIN_PRINT_DPI) : null;
 
   const fmt = (n: number) => n.toFixed(1).replace(/\.0$/, "");
 
@@ -135,11 +138,13 @@ export default function GalleryFrame({ imageDataUrl, frame, size, printArea, sou
         {dpi !== null && (
           <div
             role={lowRes ? "alert" : undefined}
-            style={{ color: lowRes ? "#b3261e" : undefined, fontWeight: lowRes ? 600 : undefined }}
+            style={{ color: lowRes ? "#b3261e" : softRes ? "#9a6700" : undefined, fontWeight: lowRes || softRes ? 600 : undefined }}
           >
             {lowRes
-              ? `Low resolution: ~${dpi} DPI at ${size.inches} (needs ${MIN_PRINT_DPI}+). Expect a soft/pixelated print — choose a smaller size or a larger image.`
-              : `Resolution: ~${dpi} DPI at ${size.inches}`}
+              ? `Low resolution for ${size.inches} (~${dpi} DPI): this print may look blurry. Try a smaller size or upload the original photo (not a screenshot or WhatsApp copy).`
+              : softRes
+              ? `Good enough for ${size.inches} (~${dpi} DPI), though fine detail may look slightly soft up close.${bestWidthIn ? ` Sharpest at up to ~${bestWidthIn}" wide.` : ""}`
+              : `Sharp print quality at ${size.inches} (~${dpi} DPI)`}
           </div>
         )}
       </div>
