@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import Uploader from "./components/Uploader";
 import GalleryFrame from "./components/GalleryFrame";
 import Configurator from "./components/Configurator";
 import Placard from "./components/Placard";
 import CameraPlacer from "./components/CameraPlacer";
+const WallAR = lazy(() => import("./components/WallAR"));
 
 const REPORT_EMAIL = import.meta.env.VITE_REPORT_EMAIL || "support@example.com";
 
@@ -64,6 +65,7 @@ export default function App() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [showAR, setShowAR] = useState(false);
   const [priceCents, setPriceCents] = useState<number | null>(null);
   const [currency, setCurrency] = useState<string>("gbp");
   const [sourceDims, setSourceDims] = useState<{ w: number; h: number } | null>(null);
@@ -399,6 +401,24 @@ export default function App() {
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
                   <button
+                    onClick={() => setShowAR(true)}
+                    style={{
+                      background: "var(--ink)",
+                      border: "1px solid var(--ink)",
+                      padding: "10px 16px",
+                      borderRadius: 2,
+                      fontFamily: "var(--font-body)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "var(--paper)",
+                    }}
+                  >
+                    View in AR on your wall →
+                  </button>
+                  <p style={{ margin: 0, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--ink-soft)", opacity: 0.55 }}>
+                    true size · point at your wall, move phone slowly
+                  </p>
+                  <button
                     onClick={() => setShowCamera(true)}
                     style={{
                       background: "var(--paper)",
@@ -411,7 +431,7 @@ export default function App() {
                       color: "var(--ink)",
                     }}
                   >
-                    See it on your wall →
+                    Quick camera preview →
                   </button>
                   <p
                     style={{
@@ -452,6 +472,19 @@ export default function App() {
         </div>
         )}
       </main>
+
+      {showAR && imageDataUrl && (
+        <Suspense fallback={null}>
+          <WallAR
+            imageDataUrl={imageDataUrl}
+            frame={frame}
+            size={size}
+            printArea={printArea}
+            onClose={() => setShowAR(false)}
+            onFallback={() => { setShowAR(false); setShowCamera(true); }}
+          />
+        </Suspense>
+      )}
 
       {showCamera && imageDataUrl && (
         <CameraPlacer

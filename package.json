@@ -11,14 +11,17 @@
     "setup:pricing": "node --env-file=.env.local scripts/setup-cost-lookup.mjs"
   },
   "dependencies": {
+    "@google/model-viewer": "^4.4.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "stripe": "^22.6.0"
+    "stripe": "^22.6.0",
+    "three": "~0.183.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.1",
+    "@types/three": "^0.183.1",
     "@vercel/node": "^3.2.29",
     "@vitejs/plugin-react": "^5.0.4",
     "typescript": "~5.8.2",
