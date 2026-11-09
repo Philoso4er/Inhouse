@@ -3,6 +3,7 @@ import { getShippingProfiles, getVariantCosts, shippingCostFromProfiles } from "
 import {
   PROVIDERS,
   candidateProviders,
+  fallbackProviders,
   regionForCountry,
   type PrintArea,
   type ProviderConfig,
@@ -133,9 +134,16 @@ export async function getQuote(
 ): Promise<Quote> {
   const c = country.toUpperCase();
   const providers = providerKey ? [PROVIDERS[providerKey]] : candidateProviders(c);
-  const quotes = (await Promise.all(providers.map((p) => quoteProvider(p, sizeId, frame, c)))).filter(
+  let quotes = (await Promise.all(providers.map((p) => quoteProvider(p, sizeId, frame, c)))).filter(
     (q): q is Quote => q !== null
   );
+  // The regional provider doesn't make this size/frame: try a cross-region
+  // fallback (e.g. UK white frames printed by Print Pigeons in the EU).
+  if (!quotes.length && !providerKey) {
+    quotes = (await Promise.all(fallbackProviders(c).map((p) => quoteProvider(p, sizeId, frame, c)))).filter(
+      (q): q is Quote => q !== null
+    );
+  }
   if (!quotes.length) throw new Error(`${sizeId} / ${frame} is not available for ${c}`);
   return quotes.sort((a, b) => a.priceUsdCents - b.priceUsdCents)[0];
 }

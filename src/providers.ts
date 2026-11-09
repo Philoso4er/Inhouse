@@ -33,6 +33,9 @@ export interface ProviderConfig {
   costLookupProductEnv: string;
   defaultCostLookupProductId?: string; // not secret: a hidden, unpublished product in the shop
   variants: Record<string, Partial<Record<FrameFinish, ProviderVariant>>>;
+  // Other regions this provider also serves, but only for size/frame combos
+  // the region's own provider doesn't make (e.g. white frames for the UK).
+  fallbackForRegions?: Exclude<Region, "ROW">[];
 }
 
 const pa = (w: number, h: number, wp: number, hp: number): PrintArea => ({ widthIn: w, heightIn: h, widthPx: wp, heightPx: hp });
@@ -46,7 +49,8 @@ const v = (variantId: number, printArea: PrintArea, cost: number, home: number, 
 
 export const PROVIDERS: Record<ProviderKey, ProviderConfig> = {
   // Blueprint 764 "Framed Posters" by Print Clever — prints in the UK.
-  // Only one frame (black wood), so walnut/white are hidden for UK customers.
+  // Only one frame (black wood). UK white frames come from Print Pigeons (EU)
+  // as a fallback; walnut is still hidden for UK customers.
   printclever_uk: {
     key: "printclever_uk",
     name: "Print Clever",
@@ -64,6 +68,7 @@ export const PROVIDERS: Record<ProviderKey, ProviderConfig> = {
   },
   // Blueprint 492 "Vertical Framed Poster" by Print Pigeons — prints in Latvia (EU).
   // Black and white frames only; walnut is hidden for EU customers.
+  // Also ships white frames to the UK, since Print Clever only makes black.
   printpigeons_eu: {
     key: "printpigeons_eu",
     name: "Print Pigeons",
@@ -73,6 +78,7 @@ export const PROVIDERS: Record<ProviderKey, ProviderConfig> = {
     printProviderId: 36,
     costLookupProductEnv: "PRINTIFY_COST_LOOKUP_PRODUCT_ID_EU",
     defaultCostLookupProductId: "6acef4b203967ac067076b0d",
+    fallbackForRegions: ["UK"],
     variants: {
       "11x14": {
         black: v(65400, pa(11, 14, 3300, 4200), 3501, 2639, 5549),
@@ -139,6 +145,16 @@ export function candidateProviders(country: string): ProviderConfig[] {
   return all.filter((p) => p.region === region);
 }
 
+/**
+ * Providers from another region that fill gaps for this country: they are
+ * used only for a size/frame none of candidateProviders() makes.
+ */
+export function fallbackProviders(country: string): ProviderConfig[] {
+  const region = regionForCountry(country);
+  if (region === "ROW") return [];
+  return Object.values(PROVIDERS).filter((p) => p.region !== region && p.fallbackForRegions?.includes(region));
+}
+
 /** Countries offered in the country selector (and allowed at checkout). */
 export const SHIPPING_COUNTRIES: { code: string; name: string }[] = [
   { code: "GB", name: "United Kingdom" },
@@ -167,7 +183,7 @@ export function isSupportedCountry(code: string) {
 /** Frames/sizes available for a country (union over candidate providers). */
 export function availability(country: string): Record<string, FrameFinish[]> {
   const out: Record<string, FrameFinish[]> = {};
-  for (const p of candidateProviders(country)) {
+  for (const p of [...candidateProviders(country), ...fallbackProviders(country)]) {
     for (const [sizeId, frames] of Object.entries(p.variants)) {
       out[sizeId] = Array.from(new Set([...(out[sizeId] || []), ...(Object.keys(frames) as FrameFinish[])]));
     }

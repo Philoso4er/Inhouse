@@ -103,3 +103,8 @@ No database: the Stripe **PaymentIntent metadata** holds the mapping and status
 with the framed print overlaid at its true aspect ratio for the chosen size and frame colour, plus a soft shadow.
 One finger drags it, two-finger pinch resizes it, two-finger twist rotates it. Capture saves or shares a JPEG.
 Camera permission errors show a clear message and a Try again button. Works on iPhone Safari and Android Chrome.
+
+## Frame colours by region
+- UK: black from Print Clever (Swindon, blueprint 764 – black only). White is filled in by Print Pigeons
+  (Riga, blueprint 492) via `fallbackForRegions`, so it costs more (EU→UK shipping). Walnut is not offered.
+- EU: black + white from Print Pigeons. US: black, walnut, white from Printify Choice.
