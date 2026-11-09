@@ -49,7 +49,7 @@ function OrderStatus() {
     </p>
   );
 }
-import { SIZE_OPTIONS, type FrameFinish } from "./types";
+import { SIZE_OPTIONS, frameLabel, type FrameFinish } from "./types";
 import { SHIPPING_COUNTRIES, type PrintArea } from "./providers";
 
 export default function App() {
@@ -77,7 +77,7 @@ export default function App() {
   // Starts empty; the first price call fills it from the visitor's IP country.
   const [country, setCountry] = useState<string>("");
   const [availability, setAvailability] = useState<Record<string, FrameFinish[]> | null>(null);
-  const [quoteInfo, setQuoteInfo] = useState<{ sizeId: string; provider: string; location: string; printArea: PrintArea } | null>(null);
+  const [quoteInfo, setQuoteInfo] = useState<{ sizeId: string; provider: string; location: string; printArea: PrintArea; shippingNote: string | null } | null>(null);
   // Only trust the quote's print area if it belongs to the currently selected size.
   const printArea = quoteInfo && quoteInfo.sizeId === sizeId ? quoteInfo.printArea : undefined;
 
@@ -143,7 +143,13 @@ export default function App() {
         setPriceCents(data.priceCents);
         if (data.currency) setCurrency(data.currency);
         setAvailability(data.availability || null);
-        setQuoteInfo({ sizeId, provider: data.provider.name, location: data.provider.location, printArea: data.printArea });
+        setQuoteInfo({
+          sizeId,
+          provider: data.provider.name,
+          location: data.provider.location,
+          printArea: data.printArea,
+          shippingNote: data.shippingNote || null,
+        });
       })
       .catch(() => {
         if (!cancelled) setPriceError("Couldn't load live pricing — try again.");
@@ -200,7 +206,7 @@ export default function App() {
           sizeId,
           frame,
           country,
-          sizeLabel: `${size.label} (${size.inches}) — ${frame}`,
+          sizeLabel: `${size.label} (${size.inches}) — ${frame === "none" ? "unframed" : frame}`,
         }),
       });
       if (!res.ok) {
@@ -371,11 +377,14 @@ export default function App() {
                   onSizeChange={setSizeId}
                   onFrameChange={setFrame}
                 />
+                {quoteInfo?.shippingNote && quoteInfo.sizeId === sizeId && !priceLoading && (
+                  <p style={{ margin: "-4px 0 0", fontSize: 13, color: "var(--ink-soft)" }}>{quoteInfo.shippingNote}</p>
+                )}
                 <Placard
                   orderNumber={1}
                   sizeLabel={size.label}
                   sizeInches={size.inches}
-                  frameLabel={`${frame[0].toUpperCase()}${frame.slice(1)} frame`}
+                  frameLabel={frameLabel(frame)}
                   priceCents={priceCents}
                   currency={currency}
                   priceLoading={priceLoading}

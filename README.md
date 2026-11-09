@@ -105,6 +105,14 @@ One finger drags it, two-finger pinch resizes it, two-finger twist rotates it. C
 Camera permission errors show a clear message and a Try again button. Works on iPhone Safari and Android Chrome.
 
 ## Frame colours by region
-- UK: black from Print Clever (Swindon, blueprint 764 – black only). White is filled in by Print Pigeons
-  (Riga, blueprint 492) via `fallbackForRegions`, so it costs more (EU→UK shipping). Walnut is not offered.
-- EU: black + white from Print Pigeons. US: black, walnut, white from Printify Choice.
+Every country can pick black, white and walnut. Each region uses its local provider first
+(UK: Print Clever, black only; EU: Print Pigeons, black + white; US: Printify Choice, all three). If the local
+provider doesn't make a size/frame, `fallbackProviders()` picks the cheapest other provider (UK white: Latvia;
+UK/EU walnut: US), prices it with the same margin, and the picker shows a one-line "Ships from …" note.
+Other countries (CA, AU, …) already compare every provider and take the cheapest.
+
+### No frame (unframed print)
+"No frame" is offered everywhere from a local provider: UK Print Clever "Fine Art Posters" matte (blueprint 804),
+EU Print Pigeons "Giclée Art Print" matte (494), US Printify Choice "Matte Vertical Posters" (282). Other countries
+take the cheapest. Each has its own hidden cost-lookup product, created with
+`node --env-file=.env.local scripts/setup-cost-lookup-for.mjs <blueprint> <provider> <variantIds...>`.

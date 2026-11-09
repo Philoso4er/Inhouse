@@ -1,4 +1,4 @@
-export type FrameFinish = "walnut" | "black" | "white";
+export type FrameFinish = "walnut" | "black" | "white" | "none";
 
 export interface SizeOption {
   id: string;
@@ -6,7 +6,7 @@ export interface SizeOption {
   inches: string;
   // Real Printify variant_id per frame color, from blueprint 540
   // ("Framed Vertical Poster"), print provider 99 ("Printify Choice").
-  variantIdByFrame: Record<FrameFinish, number>;
+  variantIdByFrame: Partial<Record<FrameFinish, number>>;
   // Printify print area for this variant (blueprint 540 / provider 99):
   // the full poster sheet at 300 DPI. Source: Printify recommended pixel
   // dimensions (https://printify.com/blog/art-print-sizes/) — width × height.
@@ -19,7 +19,14 @@ export const FRAME_FINISHES: { id: FrameFinish; label: string; swatch: string }[
   { id: "walnut", label: "Walnut", swatch: "#4a3526" },
   { id: "black", label: "Black", swatch: "#151515" },
   { id: "white", label: "White", swatch: "#f2f0ea" },
+  // Unframed print (poster). Swatch: paper with a diagonal "none" stroke.
+  { id: "none", label: "No frame", swatch: "linear-gradient(135deg, #fafaf7 46%, #b5b0a6 46%, #b5b0a6 54%, #fafaf7 54%)" },
 ];
+
+/** Human label for a frame choice, e.g. "Black frame" / "No frame". */
+export function frameLabel(frame: FrameFinish): string {
+  return frame === "none" ? "No frame" : `${frame[0].toUpperCase()}${frame.slice(1)} frame`;
+}
 
 export const SIZE_OPTIONS: SizeOption[] = [
   {

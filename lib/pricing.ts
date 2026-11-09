@@ -4,6 +4,7 @@ import {
   PROVIDERS,
   candidateProviders,
   fallbackProviders,
+  fallbackShippingNote,
   regionForCountry,
   type PrintArea,
   type ProviderConfig,
@@ -62,6 +63,10 @@ export interface Quote {
   variantId: number;
   printArea: PrintArea;
   live: boolean; // false if any fallback value was used
+  /** True if a provider outside the buyer's region fills a gap (ships from further away). */
+  crossRegion: boolean;
+  /** Friendly one-line note for crossRegion quotes, otherwise null. */
+  shippingNote: string | null;
 }
 
 async function quoteProvider(
@@ -118,6 +123,8 @@ async function quoteProvider(
     variantId: variant.variantId,
     printArea: variant.printArea,
     live,
+    crossRegion: false,
+    shippingNote: null,
   };
 }
 
@@ -138,11 +145,11 @@ export async function getQuote(
     (q): q is Quote => q !== null
   );
   // The regional provider doesn't make this size/frame: try a cross-region
-  // fallback (e.g. UK white frames printed by Print Pigeons in the EU).
+  // fallback (e.g. UK white from Print Pigeons in Latvia, walnut from the US).
   if (!quotes.length && !providerKey) {
-    quotes = (await Promise.all(fallbackProviders(c).map((p) => quoteProvider(p, sizeId, frame, c)))).filter(
-      (q): q is Quote => q !== null
-    );
+    quotes = (await Promise.all(fallbackProviders(c).map((p) => quoteProvider(p, sizeId, frame, c))))
+      .filter((q): q is Quote => q !== null)
+      .map((q) => ({ ...q, crossRegion: true, shippingNote: fallbackShippingNote(q.provider.location) }));
   }
   if (!quotes.length) throw new Error(`${sizeId} / ${frame} is not available for ${c}`);
   return quotes.sort((a, b) => a.priceUsdCents - b.priceUsdCents)[0];

@@ -16,6 +16,7 @@ const FRAME_COLOURS: Record<FrameFinish, string> = {
   walnut: "var(--walnut)",
   black: "#151515",
   white: "#f2f0ea",
+  none: "transparent",
 };
 
 // Preview width of the longest print (20x30) in CSS px; every other size is
@@ -45,7 +46,9 @@ export default function GalleryFrame({ imageDataUrl, frame, size, printArea, sou
 
   const area = printArea || size.printArea;
   const sheetW = area.widthIn * PX_PER_INCH;
-  const moulding = FRAME_MOULDING_IN * PX_PER_INCH;
+  const framed = frame !== "none";
+  // Unframed prints have no moulding and no hidden lip: the whole sheet shows.
+  const moulding = framed ? FRAME_MOULDING_IN * PX_PER_INCH : 0;
 
   // Image placement in inches on the sheet.
   const imgHeightIn = dims ? (area.widthIn * dims.h) / dims.w : area.heightIn;
@@ -75,7 +78,9 @@ export default function GalleryFrame({ imageDataUrl, frame, size, printArea, sou
           padding: moulding,
           background: FRAME_COLOURS[frame],
           borderRadius: 2,
-          boxShadow: "0 30px 70px -20px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.06)",
+          boxShadow: framed
+            ? "0 30px 70px -20px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.06)"
+            : "0 18px 40px -18px rgba(0,0,0,0.35)",
           maxWidth: "100%",
         }}
       >
@@ -104,6 +109,7 @@ export default function GalleryFrame({ imageDataUrl, frame, size, printArea, sou
             }}
           />
           {/* Safe area; everything outside it (the 0.25" frame lip) is shaded. */}
+          {framed && (
           <div
             aria-hidden
             style={{
@@ -117,6 +123,7 @@ export default function GalleryFrame({ imageDataUrl, frame, size, printArea, sou
               pointerEvents: "none",
             }}
           />
+          )}
         </div>
       </div>
 
@@ -124,7 +131,11 @@ export default function GalleryFrame({ imageDataUrl, frame, size, printArea, sou
         <div>
           Print area {area.widthIn}" × {area.heightIn}" ({area.widthPx} × {area.heightPx}px @300dpi) · shown to scale
         </div>
-        <div>Shaded edge ({FRAME_LIP_IN}") is hidden by the frame · keep key content inside the dashed line</div>
+        {framed ? (
+          <div>Shaded edge ({FRAME_LIP_IN}") is hidden by the frame · keep key content inside the dashed line</div>
+        ) : (
+          <div>Unframed print · the whole sheet shows</div>
+        )}
         {dims && croppedIn > 0.05 && (
           <div>
             {fmt(croppedIn)}" of your image will be cropped ({fmt(croppedIn / 2)}" top and bottom)
@@ -137,13 +148,13 @@ export default function GalleryFrame({ imageDataUrl, frame, size, printArea, sou
         )}
         {dpi !== null && (
           <div
-            role={lowRes ? "alert" : undefined}
-            style={{ color: lowRes ? "#b3261e" : softRes ? "#9a6700" : undefined, fontWeight: lowRes || softRes ? 600 : undefined }}
+            role={lowRes ? "status" : undefined}
+            style={{ color: lowRes || softRes ? "#8a5a00" : undefined, fontWeight: lowRes ? 600 : undefined }}
           >
             {lowRes
-              ? `Low resolution for ${size.inches} (~${dpi} DPI): this print may look blurry. Try a smaller size or upload the original photo (not a screenshot or WhatsApp copy).`
+              ? `This photo may look a little soft at ${size.inches} (~${dpi} DPI). A smaller size or the original, higher-resolution photo (rather than a screenshot or WhatsApp copy) will look sharper.`
               : softRes
-              ? `Good enough for ${size.inches} (~${dpi} DPI), though fine detail may look slightly soft up close.${bestWidthIn ? ` Sharpest at up to ~${bestWidthIn}" wide.` : ""}`
+              ? `Looks good at ${size.inches} (~${dpi} DPI). Fine detail may be a touch soft up close.${bestWidthIn ? ` Sharpest at up to ~${bestWidthIn}" wide.` : ""}`
               : `Sharp print quality at ${size.inches} (~${dpi} DPI)`}
           </div>
         )}

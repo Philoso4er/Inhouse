@@ -4,7 +4,13 @@ import type { FrameFinish } from "./types.js";
 // API (/v1/catalog/blueprints/{id}/print_providers.json and .../variants.json)
 // on 2026-10-14.
 export type Region = "UK" | "EU" | "US" | "ROW";
-export type ProviderKey = "printclever_uk" | "printpigeons_eu" | "printifychoice_us";
+export type ProviderKey =
+  | "printclever_uk"
+  | "printpigeons_eu"
+  | "printifychoice_us"
+  | "printclever_uk_unframed"
+  | "printpigeons_eu_unframed"
+  | "printifychoice_us_unframed";
 
 export interface PrintArea {
   widthIn: number;
@@ -33,9 +39,6 @@ export interface ProviderConfig {
   costLookupProductEnv: string;
   defaultCostLookupProductId?: string; // not secret: a hidden, unpublished product in the shop
   variants: Record<string, Partial<Record<FrameFinish, ProviderVariant>>>;
-  // Other regions this provider also serves, but only for size/frame combos
-  // the region's own provider doesn't make (e.g. white frames for the UK).
-  fallbackForRegions?: Exclude<Region, "ROW">[];
 }
 
 const pa = (w: number, h: number, wp: number, hp: number): PrintArea => ({ widthIn: w, heightIn: h, widthPx: wp, heightPx: hp });
@@ -49,8 +52,8 @@ const v = (variantId: number, printArea: PrintArea, cost: number, home: number, 
 
 export const PROVIDERS: Record<ProviderKey, ProviderConfig> = {
   // Blueprint 764 "Framed Posters" by Print Clever — prints in the UK.
-  // Only one frame (black wood). UK white frames come from Print Pigeons (EU)
-  // as a fallback; walnut is still hidden for UK customers.
+  // Only one frame (black wood). Other UK frames come from the cheapest other
+  // provider (white: Print Pigeons, walnut: Printify Choice), see fallbackProviders().
   printclever_uk: {
     key: "printclever_uk",
     name: "Print Clever",
@@ -67,8 +70,7 @@ export const PROVIDERS: Record<ProviderKey, ProviderConfig> = {
     },
   },
   // Blueprint 492 "Vertical Framed Poster" by Print Pigeons — prints in Latvia (EU).
-  // Black and white frames only; walnut is hidden for EU customers.
-  // Also ships white frames to the UK, since Print Clever only makes black.
+  // Black and white frames only; EU walnut comes from Printify Choice (US).
   printpigeons_eu: {
     key: "printpigeons_eu",
     name: "Print Pigeons",
@@ -78,7 +80,6 @@ export const PROVIDERS: Record<ProviderKey, ProviderConfig> = {
     printProviderId: 36,
     costLookupProductEnv: "PRINTIFY_COST_LOOKUP_PRODUCT_ID_EU",
     defaultCostLookupProductId: "6acef4b203967ac067076b0d",
-    fallbackForRegions: ["UK"],
     variants: {
       "11x14": {
         black: v(65400, pa(11, 14, 3300, 4200), 3501, 2639, 5549),
@@ -121,7 +122,58 @@ export const PROVIDERS: Record<ProviderKey, ProviderConfig> = {
       },
     },
   },
+  // Unframed prints ("No frame"), one local provider per region. Cost-lookup
+  // products created 2026-11-09 with scripts/setup-cost-lookup-for.mjs.
+  // Blueprint 804 "Fine Art Posters" (matte) by Print Clever — prints in the UK.
+  printclever_uk_unframed: {
+    key: "printclever_uk_unframed",
+    name: "Print Clever",
+    location: "GB",
+    region: "UK",
+    blueprintId: 804,
+    printProviderId: 72,
+    costLookupProductEnv: "PRINTIFY_COST_LOOKUP_PRODUCT_ID_UK_UNFRAMED",
+    defaultCostLookupProductId: "6af1f19a99f1d00a010525aa",
+    variants: {
+      "11x14": { none: v(100934, pa(11, 14, 3300, 4200), 1456, 519, 2079) },
+      "16x20": { none: v(75292, pa(16, 20, 4795, 6000), 1489, 519, 2079) },
+      "20x30": { none: v(100940, pa(20, 30, 6000, 9000), 2943, 559, 2079) },
+    },
+  },
+  // Blueprint 494 "Giclée Art Print" (matte) by Print Pigeons — prints in Latvia.
+  printpigeons_eu_unframed: {
+    key: "printpigeons_eu_unframed",
+    name: "Print Pigeons",
+    location: "LV",
+    region: "EU",
+    blueprintId: 494,
+    printProviderId: 36,
+    costLookupProductEnv: "PRINTIFY_COST_LOOKUP_PRODUCT_ID_EU_UNFRAMED",
+    defaultCostLookupProductId: "6af1f19ca851a92a740118be",
+    variants: {
+      "11x14": { none: v(66039, pa(11, 14, 3300, 4200), 1003, 1249, 1899) },
+      "16x20": { none: v(66047, pa(16, 20, 4800, 6000), 1407, 1249, 1899) },
+      "20x30": { none: v(66055, pa(20, 30, 6000, 9000), 2204, 1249, 1899) },
+    },
+  },
+  // Blueprint 282 "Matte Vertical Posters" via Printify Choice — prints in the US.
+  printifychoice_us_unframed: {
+    key: "printifychoice_us_unframed",
+    name: "Printify Choice",
+    location: "US",
+    region: "US",
+    blueprintId: 282,
+    printProviderId: 99,
+    costLookupProductEnv: "PRINTIFY_COST_LOOKUP_PRODUCT_ID_US_UNFRAMED",
+    defaultCostLookupProductId: "6af1f19d7728400d94070c11",
+    variants: {
+      "11x14": { none: v(43135, pa(11, 14, 3300, 4200), 592, 599, 1219) },
+      "16x20": { none: v(43141, pa(16, 20, 4800, 6000), 1077, 599, 1219) },
+      "20x30": { none: v(43147, pa(20, 30, 6000, 9000), 1238, 599, 1219) },
+    },
+  },
 };
+
 
 export const EU_COUNTRIES = [
   "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE",
@@ -146,13 +198,26 @@ export function candidateProviders(country: string): ProviderConfig[] {
 }
 
 /**
- * Providers from another region that fill gaps for this country: they are
- * used only for a size/frame none of candidateProviders() makes.
+ * Providers from other regions that fill gaps for this country: used only for
+ * a size/frame none of candidateProviders() makes (cheapest delivered wins).
+ * ROW already considers every provider, so it has no fallbacks.
  */
 export function fallbackProviders(country: string): ProviderConfig[] {
   const region = regionForCountry(country);
   if (region === "ROW") return [];
-  return Object.values(PROVIDERS).filter((p) => p.region !== region && p.fallbackForRegions?.includes(region));
+  return Object.values(PROVIDERS).filter((p) => p.region !== region);
+}
+
+const COUNTRY_NAMES: Record<string, string> = { GB: "the UK", LV: "Latvia", US: "the US" };
+
+/**
+ * One-line note shown next to the picker when an option ships from further
+ * away than the buyer's local default provider (i.e. a cross-region fallback).
+ */
+export function fallbackShippingNote(location: string): string {
+  const from = COUNTRY_NAMES[location] || location;
+  if (location === "US") return `Ships from ${from}, takes longer and costs more. Price includes the extra shipping.`;
+  return `Ships from ${from}, usually takes a few extra days. Price includes the extra shipping.`;
 }
 
 /** Countries offered in the country selector (and allowed at checkout). */
