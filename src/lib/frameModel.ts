@@ -6,11 +6,14 @@ import type { FrameFinish } from "../types";
 export const INCH = 0.0254;
 export const MOULDING_IN = 0.75; // matches CameraPlacer / GalleryFrame
 export const FRAME_DEPTH_M = 0.022;
-const FRAME_COLOURS: Record<FrameFinish, number> = { walnut: 0x4a3526, black: 0x151515, white: 0xf2f0ea };
+const FRAME_COLOURS: Record<FrameFinish, number> = { walnut: 0x4a3526, black: 0x151515, white: 0xf2f0ea, none: 0xfafaf7 };
+// Unframed print: a thin sheet flat on the wall.
+const SHEET_DEPTH_M = 0.002;
 
 export interface PrintSize { widthIn: number; heightIn: number }
 
-export function frameOuterSizeM(p: PrintSize) {
+export function frameOuterSizeM(p: PrintSize, frame?: FrameFinish) {
+  if (frame === "none") return { width: p.widthIn * INCH, height: p.heightIn * INCH, depth: SHEET_DEPTH_M };
   return { width: (p.widthIn + 2 * MOULDING_IN) * INCH, height: (p.heightIn + 2 * MOULDING_IN) * INCH, depth: FRAME_DEPTH_M };
 }
 
@@ -37,18 +40,25 @@ export function buildFrameScene(p: PrintSize, frame: FrameFinish, texture?: THRE
     mesh.name = name;
     group.add(mesh);
   };
-  bar(w + 2 * m, m, 0, h / 2 + m / 2, "FrameTop");
-  bar(w + 2 * m, m, 0, -h / 2 - m / 2, "FrameBottom");
-  bar(m, h, -w / 2 - m / 2, 0, "FrameLeft");
-  bar(m, h, w / 2 + m / 2, 0, "FrameRight");
-  // Backing board
-  const back = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.004).translate(0, 0, 0.002), new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 1 }));
-  back.name = "Backing";
+  const framed = frame !== "none";
+  if (framed) {
+    bar(w + 2 * m, m, 0, h / 2 + m / 2, "FrameTop");
+    bar(w + 2 * m, m, 0, -h / 2 - m / 2, "FrameBottom");
+    bar(m, h, -w / 2 - m / 2, 0, "FrameLeft");
+    bar(m, h, w / 2 + m / 2, 0, "FrameRight");
+  }
+  // Backing board (framed) or the paper sheet itself (unframed)
+  const backD = framed ? 0.004 : SHEET_DEPTH_M - 0.0005;
+  const back = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, backD).translate(0, 0, backD / 2),
+    new THREE.MeshStandardMaterial({ color: framed ? 0xdddddd : 0xfafaf7, roughness: 1 })
+  );
+  back.name = framed ? "Backing" : "Sheet";
   group.add(back);
   // The print, slightly recessed behind the moulding face
   const printMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0, map: texture ?? null });
   printMat.name = "Print";
-  const print = new THREE.Mesh(new THREE.PlaneGeometry(w, h).translate(0, 0, d - 0.006), printMat);
+  const print = new THREE.Mesh(new THREE.PlaneGeometry(w, h).translate(0, 0, framed ? d - 0.006 : SHEET_DEPTH_M), printMat);
   print.name = "Print";
   group.add(print);
   if (orientation === "quicklook") {

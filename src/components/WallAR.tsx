@@ -71,7 +71,7 @@ export default function WallAR({ imageDataUrl, frame, size, printArea, onClose, 
       <button onClick={onClose} aria-label="Close" style={{ position: "absolute", top: 12, right: 14, background: "none", border: 0, color: "#fff", fontSize: 28 }}>×</button>
       <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 22, textAlign: "center" }}>View in AR on your wall</h2>
       <p style={{ margin: 0, fontFamily: "var(--font-mono)", fontSize: 11, opacity: 0.75, textAlign: "center" }}>
-        {size.label} {size.inches} · {frame} frame · true size ≈ {cm(area.widthIn)} × {cm(area.heightIn)} cm
+        {size.label} {size.inches} · {frame === "none" ? "no frame" : `${frame} frame`} · true size ≈ {cm(area.widthIn)} × {cm(area.heightIn)} cm
       </p>
 
       {status === "building" && <p style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>building your 3D print…</p>}
@@ -90,7 +90,7 @@ export default function WallAR({ imageDataUrl, frame, size, printArea, onClose, 
               ref: mvRef,
               src: urls.glb,
               "ios-src": urls.usdz,
-              alt: "Your framed print",
+              alt: frame === "none" ? "Your unframed print" : "Your framed print",
               ar: true,
               "ar-modes": "webxr scene-viewer quick-look",
               "ar-placement": "wall",

@@ -17,7 +17,7 @@ interface Transform {
   rotation: number; // radians
 }
 
-const FRAME_COLOURS: Record<FrameFinish, string> = { walnut: "#4a3526", black: "#151515", white: "#f2f0ea" };
+const FRAME_COLOURS: Record<FrameFinish, string> = { walnut: "#4a3526", black: "#151515", white: "#f2f0ea", none: "#fafaf7" };
 const MOULDING_IN = 0.75;
 const BASE_W = 170; // on-screen width of the frame at scale 1
 
@@ -40,11 +40,12 @@ function cameraError(e: any): string {
 
 export default function CameraPlacer({ imageDataUrl, frame, size, printArea, onClose }: Props) {
   const area = printArea || size.printArea;
-  const outerW = area.widthIn + 2 * MOULDING_IN;
-  const outerH = area.heightIn + 2 * MOULDING_IN;
+  const mouldingIn = frame === "none" ? 0 : MOULDING_IN; // unframed: just the sheet
+  const outerW = area.widthIn + 2 * mouldingIn;
+  const outerH = area.heightIn + 2 * mouldingIn;
   const frameW = BASE_W;
   const frameH = (BASE_W * outerH) / outerW; // true aspect ratio, always
-  const moulding = (MOULDING_IN / outerW) * BASE_W;
+  const moulding = (mouldingIn / outerW) * BASE_W;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -219,7 +220,7 @@ export default function CameraPlacer({ imageDataUrl, frame, size, printArea, onC
               boxShadow: "0 14px 30px -8px rgba(0,0,0,0.55), inset 0 0 3px rgba(0,0,0,0.35)",
               touchAction: "none", cursor: "grab", userSelect: "none", WebkitUserSelect: "none",
             }}
-            aria-label="Your framed artwork — drag to move, pinch to resize, twist to rotate"
+            aria-label={`Your ${frame === "none" ? "unframed print" : "framed artwork"} — drag to move, pinch to resize, twist to rotate`}
           />
         )}
 
